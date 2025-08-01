@@ -1,4 +1,4 @@
--- ESP Library - Orientada a Endereço (Model / BasePart)
+-- ESP Library - Orientada a Endereço (Model / BasePart / outros)
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
@@ -7,37 +7,53 @@ local LocalPlayer = Players.LocalPlayer
 local ESP = {
     Enabled = true,
     TracerOrigin = "Bottom", -- Top, Center, Bottom
+    TracerLengthMultiplier = 1, -- 1 = tamanho padrão. Ex: 1.25 = 25% maior
+
+    Fonts = {
+        ["UI"] = 0,
+        ["System"] = 1,
+        ["Plex"] = 2,
+        ["Monospace"] = 3,
+    },
+
     Settings = {
         ShowTracer = true,
+        ShowTracerOutline = true,
         ShowHighlightOutline = true,
         ShowHighlightFill = true,
         ShowName = true,
         ShowDistance = true,
         ShowEntity2D = false,
+        Font = "Plex", -- Nome da fonte da tabela Fonts
     },
+
+    TracerOutline = {
+        Enabled = true,
+        Color = Color3.fromRGB(0, 0, 0),
+        Thickness = 3.5, -- precisa ser maior que o tracer normal
+    },
+
     Distance = {
-        Min = 0,     -- Distância mínima (em studs)
-        Max = 1000,  -- Distância máxima (em studs)
+        Min = 0,
+        Max = 1000,
     },
-    Objects = {},
+
     Entity2D = {
         Shape = "Cylinder", -- Cylinder, Ball
         Color = Color3.fromRGB(255, 0, 0),
     },
+
+    Objects = {},
 }
 
--- Utilitário para calcular distância
 local function getDistanceFromPlayer(pos)
-    if not Camera or not Camera.CFrame then return 0 end
     return (Camera.CFrame.Position - pos).Magnitude
 end
 
--- Cria ESP em um objeto (Model/BasePart)
 function ESP:AddESP(object, displayName, color)
     if not object or self.Objects[object] then return end
     local espData = { Parts = {} }
 
-    -- Define alvo (ponto central do ESP)
     local target = object:IsA("Model") and object:FindFirstChildWhichIsA("BasePart") or object
     if not target then return end
 
@@ -55,7 +71,7 @@ function ESP:AddESP(object, displayName, color)
         espData.Highlight = hl
     end
 
-    -- Tracer + Texto
+    -- Tracer, Texts
     if self.Settings.ShowTracer or self.Settings.ShowName or self.Settings.ShowDistance then
         local tracer = Drawing.new("Line")
         tracer.Thickness = 1.5
@@ -63,16 +79,35 @@ function ESP:AddESP(object, displayName, color)
         tracer.Visible = false
         espData.Tracer = tracer
 
-        local text = Drawing.new("Text")
-        text.Size = 14
-        text.Center = true
-        text.Outline = true
-        text.Color = color or Color3.fromRGB(255, 255, 255)
-        text.Visible = false
-        espData.Text = text
+        -- Tracer outline (opcional)
+        if self.Settings.ShowTracer and self.Settings.ShowTracerOutline then
+            local outline = Drawing.new("Line")
+            outline.Thickness = self.TracerOutline.Thickness
+            outline.Color = self.TracerOutline.Color
+            outline.Visible = false
+            espData.TracerOutline = outline
+        end
+
+        local nameText = Drawing.new("Text")
+        nameText.Size = 14
+        nameText.Center = true
+        nameText.Outline = true
+        nameText.Color = color or Color3.fromRGB(255, 255, 255)
+        nameText.Visible = false
+        nameText.Font = self.Fonts[self.Settings.Font]
+        espData.NameText = nameText
+
+        local distanceText = Drawing.new("Text")
+        distanceText.Size = 13
+        distanceText.Center = true
+        distanceText.Outline = true
+        distanceText.Color = color or Color3.fromRGB(200, 200, 200)
+        distanceText.Visible = false
+        distanceText.Font = self.Fonts[self.Settings.Font]
+        espData.DistanceText = distanceText
     end
 
-    -- Forma 3D (ESP Entity 2D simulada)
+    -- Entity 2D shape
     if self.Settings.ShowEntity2D then
         local shape
         if self.Entity2D.Shape == "Cylinder" then
@@ -96,7 +131,6 @@ function ESP:AddESP(object, displayName, color)
 
     self.Objects[object] = espData
 
-    -- Update loop
     RunService.RenderStepped:Connect(function()
         if not object or not object.Parent then
             self:RemoveESP(object)
@@ -109,53 +143,69 @@ function ESP:AddESP(object, displayName, color)
             if espData.Highlight then espData.Highlight.Enabled = false end
             if espData.Shape then espData.Shape.Visible = false end
             if espData.Tracer then espData.Tracer.Visible = false end
-            if espData.Text then espData.Text.Visible = false end
+            if espData.TracerOutline then espData.TracerOutline.Visible = false end
+            if espData.NameText then espData.NameText.Visible = false end
+            if espData.DistanceText then espData.DistanceText.Visible = false end
             return
         end
 
         local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+        if not onScreen then return end
+
         local origin = Camera.ViewportSize / 2
         if self.TracerOrigin == "Top" then origin = Vector2.new(origin.X, 0)
         elseif self.TracerOrigin == "Bottom" then origin = Vector2.new(origin.X, Camera.ViewportSize.Y)
         end
 
-        if self.Objects[object] then
-            local data = self.Objects[object]
-            -- Highlight visível dentro da distância
-            if data.Highlight then data.Highlight.Enabled = true end
-            if data.Shape then data.Shape.Visible = true end
-            if data.Tracer then
-                data.Tracer.Visible = onScreen and self.Settings.ShowTracer
-                data.Tracer.From = origin
-                data.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-            end
-            if data.Text then
-                local text = ""
-                if self.Settings.ShowName then text = text .. displayName end
-                if self.Settings.ShowDistance then
-                    text = text .. " [" .. math.floor(dist) .. "m]"
-                end
-                data.Text.Text = text
-                data.Text.Visible = onScreen
-                data.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
-            end
+        local toPos = Vector2.new(screenPos.X, screenPos.Y)
+        local fromPos = origin:Lerp(toPos, self.TracerLengthMultiplier)
+
+        -- Tracer
+        if espData.Tracer then
+            espData.Tracer.From = fromPos
+            espData.Tracer.To = toPos
+            espData.Tracer.Visible = self.Settings.ShowTracer
         end
+
+        -- Tracer Outline
+        if espData.TracerOutline then
+            espData.TracerOutline.From = fromPos
+            espData.TracerOutline.To = toPos
+            espData.TracerOutline.Visible = self.Settings.ShowTracer and self.Settings.ShowTracerOutline
+        end
+
+        -- Name
+        if espData.NameText then
+            espData.NameText.Text = self.Settings.ShowName and displayName or ""
+            espData.NameText.Position = Vector2.new(screenPos.X, screenPos.Y - 18)
+            espData.NameText.Visible = self.Settings.ShowName
+        end
+
+        -- Distance
+        if espData.DistanceText then
+            espData.DistanceText.Text = self.Settings.ShowDistance and ("[" .. math.floor(dist) .. "m]") or ""
+            espData.DistanceText.Position = Vector2.new(screenPos.X, screenPos.Y)
+            espData.DistanceText.Visible = self.Settings.ShowDistance
+        end
+
+        if espData.Highlight then espData.Highlight.Enabled = true end
+        if espData.Shape then espData.Shape.Visible = true end
     end)
 end
 
--- Remove ESP de um objeto
 function ESP:RemoveESP(object)
-    local espData = self.Objects[object]
-    if espData then
-        if espData.Highlight then pcall(function() espData.Highlight:Destroy() end) end
-        if espData.Shape then pcall(function() espData.Shape:Destroy() end) end
-        if espData.Tracer then pcall(function() espData.Tracer:Remove() end) end
-        if espData.Text then pcall(function() espData.Text:Remove() end) end
+    local data = self.Objects[object]
+    if data then
+        if data.Highlight then pcall(function() data.Highlight:Destroy() end) end
+        if data.Shape then pcall(function() data.Shape:Destroy() end) end
+        if data.Tracer then pcall(function() data.Tracer:Remove() end) end
+        if data.TracerOutline then pcall(function() data.TracerOutline:Remove() end) end
+        if data.NameText then pcall(function() data.NameText:Remove() end) end
+        if data.DistanceText then pcall(function() data.DistanceText:Remove() end) end
         self.Objects[object] = nil
     end
 end
 
--- Remove todos
 function ESP:ClearAll()
     for obj in pairs(self.Objects) do
         self:RemoveESP(obj)
