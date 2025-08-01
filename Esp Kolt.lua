@@ -1,6 +1,4 @@
-
-
--- ESP Library - Orientada a Endereço (Model / BasePart)
+-- Biblioteca ESP com suporte a FOV alto
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
@@ -8,7 +6,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local ESP = {
     Enabled = true,
-    TracerOrigin = "Bottom", -- Top, Center, Bottom
+    TracerOrigin = "Bottom",
     Settings = {
         ShowTracer = true,
         ShowHighlightOutline = true,
@@ -18,32 +16,35 @@ local ESP = {
         ShowEntity2D = false,
     },
     Distance = {
-        Min = 0,     -- Distância mínima (em studs)
-        Max = 1000,  -- Distância máxima (em studs)
+        Min = 0,
+        Max = 1000,
     },
     Objects = {},
     Entity2D = {
-        Shape = "Cylinder", -- Cylinder, Ball
+        Shape = "Cilindro",
         Color = Color3.fromRGB(255, 0, 0),
     },
 }
 
--- Utilitário para calcular distância
+-- Correção de escala com base no FOV
+local function getFOVScale()
+    local defaultFOV = 70
+    if not Camera then return 1 end
+    return defaultFOV / Camera.FieldOfView
+end
+
 local function getDistanceFromPlayer(pos)
     if not Camera or not Camera.CFrame then return 0 end
     return (Camera.CFrame.Position - pos).Magnitude
 end
 
--- Cria ESP em um objeto (Model/BasePart)
 function ESP:AddESP(object, displayName, color)
     if not object or self.Objects[object] then return end
     local espData = { Parts = {} }
-
-    -- Define alvo (ponto central do ESP)
     local target = object:IsA("Model") and object:FindFirstChildWhichIsA("BasePart") or object
     if not target then return end
 
-    -- Highlight
+    -- Destaque
     if self.Settings.ShowHighlightOutline or self.Settings.ShowHighlightFill then
         local hl = Instance.new("Highlight")
         hl.Name = "ESP_Highlight"
@@ -57,7 +58,7 @@ function ESP:AddESP(object, displayName, color)
         espData.Highlight = hl
     end
 
-    -- Tracer + Texto
+    -- Tracer e Texto
     if self.Settings.ShowTracer or self.Settings.ShowName or self.Settings.ShowDistance then
         local tracer = Drawing.new("Line")
         tracer.Thickness = 1.5
@@ -74,10 +75,10 @@ function ESP:AddESP(object, displayName, color)
         espData.Text = text
     end
 
-    -- Forma 3D (ESP Entity 2D simulada)
+    -- Forma 2D simulada
     if self.Settings.ShowEntity2D then
         local shape
-        if self.Entity2D.Shape == "Cylinder" then
+        if self.Entity2D.Shape == "Cilindro" then
             shape = Instance.new("CylinderHandleAdornment")
         elseif self.Entity2D.Shape == "Ball" then
             shape = Instance.new("SphereHandleAdornment")
@@ -98,7 +99,7 @@ function ESP:AddESP(object, displayName, color)
 
     self.Objects[object] = espData
 
-    -- Update loop
+    -- Loop de atualização
     RunService.RenderStepped:Connect(function()
         if not object or not object.Parent then
             self:RemoveESP(object)
@@ -107,7 +108,9 @@ function ESP:AddESP(object, displayName, color)
 
         local pos = target.Position
         local dist = getDistanceFromPlayer(pos)
-        if dist < (ESP.Distance.Min or 0) or dist > (ESP.Distance.Max or 9999) then
+        local scale = getFOVScale()
+
+        if dist < (self.Distance.Min or 0) or dist > (self.Distance.Max or 9999) then
             if espData.Highlight then espData.Highlight.Enabled = false end
             if espData.Shape then espData.Shape.Visible = false end
             if espData.Tracer then espData.Tracer.Visible = false end
@@ -117,35 +120,43 @@ function ESP:AddESP(object, displayName, color)
 
         local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
         local origin = Camera.ViewportSize / 2
-        if self.TracerOrigin == "Top" then origin = Vector2.new(origin.X, 0)
-        elseif self.TracerOrigin == "Bottom" then origin = Vector2.new(origin.X, Camera.ViewportSize.Y)
+        if self.TracerOrigin == "Top" then
+            origin = Vector2.new(origin.X, 0)
+        elseif self.TracerOrigin == "Bottom" then
+            origin = Vector2.new(origin.X, Camera.ViewportSize.Y)
         end
 
-        if self.Objects[object] then
-            local data = self.Objects[object]
-            -- Highlight visível dentro da distância
-            if data.Highlight then data.Highlight.Enabled = true end
-            if data.Shape then data.Shape.Visible = true end
-            if data.Tracer then
-                data.Tracer.Visible = onScreen and self.Settings.ShowTracer
-                data.Tracer.From = origin
-                data.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+        local data = self.Objects[object]
+        if not data then return end
+
+        if data.Highlight then data.Highlight.Enabled = true end
+        if data.Shape then
+            data.Shape.Visible = true
+            data.Shape.Radius = 2 * scale
+            data.Shape.Height = 4 * scale
+        end
+
+        if data.Tracer then
+            data.Tracer.Visible = onScreen and self.Settings.ShowTracer
+            data.Tracer.From = origin
+            data.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            data.Tracer.Thickness = 1.5 * scale
+        end
+
+        if data.Text then
+            local textContent = ""
+            if self.Settings.ShowName then textContent = textContent .. displayName end
+            if self.Settings.ShowDistance then
+                textContent = textContent .. " [" .. math.floor(dist) .. "m]"
             end
-            if data.Text then
-                local text = ""
-                if self.Settings.ShowName then text = text .. displayName end
-                if self.Settings.ShowDistance then
-                    text = text .. " [" .. math.floor(dist) .. "m]"
-                end
-                data.Text.Text = text
-                data.Text.Visible = onScreen
-                data.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
-            end
+            data.Text.Text = textContent
+            data.Text.Visible = onScreen
+            data.Text.Size = 14 * scale
+            data.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15 * scale)
         end
     end)
 end
 
--- Remove ESP de um objeto
 function ESP:RemoveESP(object)
     local espData = self.Objects[object]
     if espData then
@@ -157,7 +168,6 @@ function ESP:RemoveESP(object)
     end
 end
 
--- Remove todos
 function ESP:ClearAll()
     for obj in pairs(self.Objects) do
         self:RemoveESP(obj)
@@ -165,4 +175,3 @@ function ESP:ClearAll()
 end
 
 return ESP
-
