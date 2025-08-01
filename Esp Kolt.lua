@@ -1,170 +1,150 @@
---[[ ██████████████████ ESP LIB ██████████████████ ]]
--- ✅ Suporte a: Tracer, Highlight, Nome, Distância, ESP2D (Rounded)
--- 📌 By Dhiogo - https://raw.githubusercontent.com/Kolt01/Kolt/refs/heads/main/Esp%20Kolt.lua
-
-local Players = game:GetService("Players")
+-- ESP Library - Orientada a Endereço (Model / BasePart)
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local espObjects = {}
-local connections = {}
+local ESP = {
+    Enabled = true,
+    TracerOrigin = "Bottom", -- Top, Center, Bottom
+    Settings = {
+        ShowTracer = true,
+        ShowHighlightOutline = true,
+        ShowHighlightFill = true,
+        ShowName = true,
+        ShowDistance = true,
+        ShowEntity2D = false,
+    },
+    Objects = {},
+    Entity2D = {
+        Shape = "Cylinder", -- Cylinder, Ball
+        Color = Color3.fromRGB(255, 0, 0),
+    },
+}
 
-local function createHighlight(target, fill, outline, color)
-	local h = Instance.new("Highlight")
-	h.Adornee = target
-	h.FillColor = fill and color or Color3.new()
-	h.OutlineColor = outline and color or Color3.new()
-	h.FillTransparency = fill and 0.5 or 1
-	h.OutlineTransparency = outline and 0 or 1
-	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	h.Name = "_ESPHighlight"
-	h.Parent = target
-	return h
+-- Utilitário para calcular distância
+local function getDistanceFromPlayer(pos)
+    if not Camera or not Camera.CFrame then return 0 end
+    return (Camera.CFrame.Position - pos).Magnitude
 end
 
-local function createTextLabel(name)
-	local text = Drawing.new("Text")
-	text.Text = name
-	text.Size = 14
-	text.Center = true
-	text.Outline = true
-	text.Font = 2
-	text.Visible = false
-	return text
+-- Cria ESP em um objeto (Model/BasePart)
+function ESP:AddESP(object, displayName, color)
+    if not object or self.Objects[object] then return end
+    local espData = { Parts = {} }
+
+    -- Define alvo (ponto central do ESP)
+    local target = object:IsA("Model") and object:FindFirstChildWhichIsA("BasePart") or object
+    if not target then return end
+
+    -- Highlight
+    if self.Settings.ShowHighlightOutline or self.Settings.ShowHighlightFill then
+        local hl = Instance.new("Highlight")
+        hl.Name = "ESP_Highlight"
+        hl.Adornee = object
+        hl.FillColor = color or Color3.fromRGB(255, 255, 255)
+        hl.OutlineColor = color or Color3.fromRGB(255, 255, 255)
+        hl.FillTransparency = self.Settings.ShowHighlightFill and 0.5 or 1
+        hl.OutlineTransparency = self.Settings.ShowHighlightOutline and 0 or 1
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent = object
+        espData.Highlight = hl
+    end
+
+    -- Tracer + Texto
+    if self.Settings.ShowTracer or self.Settings.ShowName or self.Settings.ShowDistance then
+        local tracer = Drawing.new("Line")
+        tracer.Thickness = 1.5
+        tracer.Color = color or Color3.fromRGB(255, 255, 255)
+        tracer.Visible = self.Settings.ShowTracer
+        espData.Tracer = tracer
+
+        local text = Drawing.new("Text")
+        text.Size = 14
+        text.Center = true
+        text.Outline = true
+        text.Color = color or Color3.fromRGB(255, 255, 255)
+        text.Visible = self.Settings.ShowName or self.Settings.ShowDistance
+        espData.Text = text
+    end
+
+    -- Forma 3D (ESP Entity 2D simulada)
+    if self.Settings.ShowEntity2D then
+        local shape
+        if self.Entity2D.Shape == "Cylinder" then
+            shape = Instance.new("CylinderHandleAdornment")
+        elseif self.Entity2D.Shape == "Ball" then
+            shape = Instance.new("SphereHandleAdornment")
+        end
+        if shape then
+            shape.Name = "ESP_Entity2D"
+            shape.Adornee = target
+            shape.AlwaysOnTop = true
+            shape.ZIndex = 10
+            shape.Color3 = self.Entity2D.Color
+            shape.Transparency = 0.4
+            shape.Radius = 2
+            shape.Height = 4
+            shape.Parent = target
+            espData.Shape = shape
+        end
+    end
+
+    self.Objects[object] = espData
+
+    -- Update loop
+    RunService.RenderStepped:Connect(function()
+        if not object or not object.Parent then
+            self:RemoveESP(object)
+            return
+        end
+
+        local pos = target.Position
+        local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+        local origin = Camera.ViewportSize / 2
+        if self.TracerOrigin == "Top" then origin = Vector2.new(origin.X, 0)
+        elseif self.TracerOrigin == "Bottom" then origin = Vector2.new(origin.X, Camera.ViewportSize.Y)
+        end
+
+        if self.Objects[object] then
+            local data = self.Objects[object]
+            if data.Tracer then
+                data.Tracer.Visible = onScreen and self.Settings.ShowTracer
+                data.Tracer.From = origin
+                data.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            end
+            if data.Text then
+                local dist = getDistanceFromPlayer(pos)
+                local text = ""
+                if self.Settings.ShowName then text = text .. displayName end
+                if self.Settings.ShowDistance then
+                    text = text .. " [" .. math.floor(dist) .. "m]"
+                end
+                data.Text.Text = text
+                data.Text.Visible = onScreen
+                data.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
+            end
+        end
+    end)
 end
 
-local function createLine()
-	local line = Drawing.new("Line")
-	line.Thickness = 1.5
-	line.Color = Color3.fromRGB(255, 255, 255)
-	line.Visible = false
-	return line
+-- Remove ESP de um objeto
+function ESP:RemoveESP(object)
+    local espData = self.Objects[object]
+    if espData then
+        if espData.Highlight then pcall(function() espData.Highlight:Destroy() end) end
+        if espData.Shape then pcall(function() espData.Shape:Destroy() end) end
+        if espData.Tracer then pcall(function() espData.Tracer:Remove() end) end
+        if espData.Text then pcall(function() espData.Text:Remove() end) end
+        self.Objects[object] = nil
+    end
 end
 
-local function createESP2D(shape, color)
-	local obj
-	if shape == "RoundedBox" then
-		obj = Drawing.new("Square")
-		obj.Filled = false
-		obj.Thickness = 2
-		obj.Visible = false
-		obj.Color = color
-		obj.Transparency = 1
-		obj.Radius = 8
-	elseif shape == "Circle" then
-		obj = Drawing.new("Circle")
-		obj.NumSides = 30
-		obj.Visible = false
-		obj.Color = color
-	end
-	return obj
-end
-
-local function distanceBetween(p1, p2)
-	return (p1 - p2).Magnitude
-end
-
-local function isOnScreen(worldPos)
-	local screenPos, onScreen = Camera:WorldToViewportPoint(worldPos)
-	return screenPos, onScreen
-end
-
-local function updateESP(obj)
-	local render = connections[obj]
-	if not render then return end
-
-	local adornee = obj.Adornee:IsA("Model") and obj.Adornee.PrimaryPart or obj.Adornee
-	if not adornee then return end
-
-	render.RenderStepped = RunService.RenderStepped:Connect(function()
-		if not adornee or not adornee:IsDescendantOf(workspace) then return end
-
-		local screenPos, onScreen = isOnScreen(adornee.Position)
-		local distance = math.floor(distanceBetween(Camera.CFrame.Position, adornee.Position))
-
-		if obj.Text then
-			obj.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
-			obj.Text.Text = string.format("%s [%sm]", obj.Name or "ESP", distance)
-			obj.Text.Visible = onScreen
-		end
-
-		if obj.Tracer then
-			local origin = {
-				Top = Vector2.new(Camera.ViewportSize.X / 2, 0),
-				Middle = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2),
-				Bottom = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-			}[obj.TracerOrigin or "Bottom"]
-
-			obj.TracerLine.From = origin
-			obj.TracerLine.To = Vector2.new(screenPos.X, screenPos.Y)
-			obj.TracerLine.Visible = onScreen
-		end
-
-		if obj.ESP2D and obj.ESP2D.Enabled then
-			local size = math.clamp(1000 / distance, 6, 40)
-			obj.ESP2D.Shape.Position = Vector2.new(screenPos.X - size / 2, screenPos.Y - size / 2)
-			obj.ESP2D.Shape.Size = Vector2.new(size, size)
-			obj.ESP2D.Shape.Visible = onScreen
-		end
-	end)
-end
-
-local ESP = {}
-
-function ESP.AddESP(settings)
-	local target = settings.Target
-	if not target then return end
-
-	local holder = {
-		Adornee = target,
-		Name = settings.Name or "ESP",
-	}
-
-	-- Highlight
-	if settings.HighlightOutline or settings.HighlightFill then
-		createHighlight(target, settings.HighlightFill, settings.HighlightOutline, settings.Color or Color3.fromRGB(255,255,255))
-	end
-
-	-- Name & Distance
-	if settings.Name or settings.ShowDistance then
-		holder.Text = createTextLabel(settings.Name or "ESP")
-	end
-
-	-- Tracer
-	if settings.Tracer then
-		holder.Tracer = true
-		holder.TracerOrigin = settings.TracerOrigin or "Bottom"
-		holder.TracerLine = createLine()
-	end
-
-	-- ESP2D
-	if settings.ESP2D and settings.ESP2D.Enabled then
-		holder.ESP2D = {
-			Enabled = true,
-			Shape = createESP2D(settings.ESP2D.Shape, settings.ESP2D.Color or Color3.fromRGB(255, 255, 255))
-		}
-	end
-
-	connections[holder] = {}
-	updateESP(holder)
-	table.insert(espObjects, holder)
-end
-
-function ESP.RemoveAll()
-	for _, esp in pairs(espObjects) do
-		if esp.Text then pcall(function() esp.Text:Remove() end) end
-		if esp.TracerLine then pcall(function() esp.TracerLine:Remove() end) end
-		if esp.ESP2D and esp.ESP2D.Shape then pcall(function() esp.ESP2D.Shape:Remove() end) end
-	end
-	for _, c in pairs(connections) do
-		if c.RenderStepped then c.RenderStepped:Disconnect() end
-	end
-	for _, e in pairs(workspace:GetDescendants()) do
-		if e:IsA("Highlight") and e.Name == "_ESPHighlight" then e:Destroy() end
-	end
-	espObjects = {}
-	connections = {}
+-- Remove todos
+function ESP:ClearAll()
+    for obj in pairs(self.Objects) do
+        self:RemoveESP(obj)
+    end
 end
 
 return ESP
