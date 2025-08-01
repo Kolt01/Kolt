@@ -1,181 +1,170 @@
---// ESP Library v1.0 - por Dhiogo
--- Suporte: Model, BasePart e estruturas complexas (via endereço)
+--[[ ██████████████████ ESP LIB ██████████████████ ]]
+-- ✅ Suporte a: Tracer, Highlight, Nome, Distância, ESP2D (Rounded)
+-- 📌 By Dhiogo - https://raw.githubusercontent.com/Kolt01/Kolt/refs/heads/main/Esp%20Kolt.lua
 
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
 
 local espObjects = {}
-local config = {
-    Enabled = true,
+local connections = {}
 
-    -- Visuals
-    ShowTracer = true,
-    TracerOrigin = "Bottom", -- Top, Middle, Bottom
-    ShowHighlightOutline = true,
-    ShowHighlightFill = true,
-    ShowName = true,
-    ShowDistance = true,
-
-    -- 2D Entity ESP
-    ShowEntity2D = true,
-    Entity2DShape = "RoundBox", -- RoundBox, Capsule, etc
-    Entity2DColor = Color3.fromRGB(255, 255, 0),
-
-    -- Estilos
-    TextColor = Color3.fromRGB(255,255,255),
-    TracerColor = Color3.fromRGB(255,255,255),
-    OutlineColor = Color3.fromRGB(255,255,255),
-    FillColor = Color3.fromRGB(255, 255, 255):Lerp(Color3.new(), 0.7),
-}
-
-local function createHighlight(target)
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Highlight"
-    highlight.Adornee = target
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.FillColor = config.FillColor
-    highlight.FillTransparency = config.ShowHighlightFill and 0.5 or 1
-    highlight.OutlineColor = config.OutlineColor
-    highlight.OutlineTransparency = config.ShowHighlightOutline and 0 or 1
-    highlight.Parent = target
-    return highlight
+local function createHighlight(target, fill, outline, color)
+	local h = Instance.new("Highlight")
+	h.Adornee = target
+	h.FillColor = fill and color or Color3.new()
+	h.OutlineColor = outline and color or Color3.new()
+	h.FillTransparency = fill and 0.5 or 1
+	h.OutlineTransparency = outline and 0 or 1
+	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	h.Name = "_ESPHighlight"
+	h.Parent = target
+	return h
 end
 
-local function createBillboardGui(target, name)
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "ESP_NameDisplay"
-    billboard.Size = UDim2.new(0, 100, 0, 30)
-    billboard.AlwaysOnTop = true
-    billboard.Adornee = target
-    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-
-    local textLabel = Instance.new("TextLabel", billboard)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.TextColor3 = config.TextColor
-    textLabel.TextStrokeTransparency = 0.5
-    textLabel.TextScaled = true
-    textLabel.Text = name
-
-    billboard.Parent = target
-    return billboard
+local function createTextLabel(name)
+	local text = Drawing.new("Text")
+	text.Text = name
+	text.Size = 14
+	text.Center = true
+	text.Outline = true
+	text.Font = 2
+	text.Visible = false
+	return text
 end
 
-local function createTracer(target)
-    local line = Drawing.new("Line")
-    line.Thickness = 1.5
-    line.Color = config.TracerColor
-    line.Visible = true
-    espObjects[target].tracer = line
+local function createLine()
+	local line = Drawing.new("Line")
+	line.Thickness = 1.5
+	line.Color = Color3.fromRGB(255, 255, 255)
+	line.Visible = false
+	return line
 end
 
-local function createEntity2D(target)
-    local adornment = Instance.new("BoxHandleAdornment")
-    adornment.Name = "ESP_Entity2D"
-    adornment.Size = target.Size + Vector3.new(0.1, 0.1, 0.1)
-    adornment.Adornee = target
-    adornment.AlwaysOnTop = true
-    adornment.ZIndex = 10
-    adornment.Color3 = config.Entity2DColor
-    adornment.Transparency = 0.4
-    adornment.Parent = target
-    adornment.Shape = Enum.AdornmentShape.Box
-    adornment.CornerRadius = UDim.new(0, 4)
-    return adornment
+local function createESP2D(shape, color)
+	local obj
+	if shape == "RoundedBox" then
+		obj = Drawing.new("Square")
+		obj.Filled = false
+		obj.Thickness = 2
+		obj.Visible = false
+		obj.Color = color
+		obj.Transparency = 1
+		obj.Radius = 8
+	elseif shape == "Circle" then
+		obj = Drawing.new("Circle")
+		obj.NumSides = 30
+		obj.Visible = false
+		obj.Color = color
+	end
+	return obj
 end
 
-local function getTracerOrigin()
-    if config.TracerOrigin == "Top" then
-        return Camera.ViewportSize / 2 + Vector2.new(0, -200)
-    elseif config.TracerOrigin == "Middle" then
-        return Camera.ViewportSize / 2
-    else
-        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-    end
+local function distanceBetween(p1, p2)
+	return (p1 - p2).Magnitude
 end
 
-local function updateESP()
-    for target, data in pairs(espObjects) do
-        if target and target:IsDescendantOf(workspace) then
-            local pos, onScreen = Camera:WorldToViewportPoint(target.Position)
-            if config.ShowTracer and data.tracer then
-                local from = getTracerOrigin()
-                data.tracer.From = from
-                data.tracer.To = Vector2.new(pos.X, pos.Y)
-                data.tracer.Visible = onScreen
-            end
-
-            if data.nameGui then
-                data.nameGui.Enabled = config.ShowName or config.ShowDistance
-                local distance = (Camera.CFrame.Position - target.Position).Magnitude
-                data.nameGui.TextLabel.Text = (config.ShowName and target.Name or "")
-                    .. (config.ShowDistance and (" [%.1fm]"):format(distance) or "")
-            end
-        else
-            -- Cleanup
-            if data.tracer then data.tracer:Remove() end
-            if data.nameGui then data.nameGui:Destroy() end
-            if data.highlight then data.highlight:Destroy() end
-            if data.entity2d then data.entity2d:Destroy() end
-            espObjects[target] = nil
-        end
-    end
+local function isOnScreen(worldPos)
+	local screenPos, onScreen = Camera:WorldToViewportPoint(worldPos)
+	return screenPos, onScreen
 end
 
-RunService.RenderStepped:Connect(function()
-    if config.Enabled then
-        updateESP()
-    end
-end)
+local function updateESP(obj)
+	local render = connections[obj]
+	if not render then return end
 
-local module = {}
+	local adornee = obj.Adornee:IsA("Model") and obj.Adornee.PrimaryPart or obj.Adornee
+	if not adornee then return end
 
-function module.AddESP(target)
-    if espObjects[target] then return end
+	render.RenderStepped = RunService.RenderStepped:Connect(function()
+		if not adornee or not adornee:IsDescendantOf(workspace) then return end
 
-    local data = {}
-    if target:IsA("Model") then
-        target = target:FindFirstChildWhichIsA("BasePart") or target.PrimaryPart or target
-    end
+		local screenPos, onScreen = isOnScreen(adornee.Position)
+		local distance = math.floor(distanceBetween(Camera.CFrame.Position, adornee.Position))
 
-    if config.ShowTracer then
-        createTracer(target)
-    end
+		if obj.Text then
+			obj.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
+			obj.Text.Text = string.format("%s [%sm]", obj.Name or "ESP", distance)
+			obj.Text.Visible = onScreen
+		end
 
-    if config.ShowName or config.ShowDistance then
-        data.nameGui = createBillboardGui(target, target.Name)
-    end
+		if obj.Tracer then
+			local origin = {
+				Top = Vector2.new(Camera.ViewportSize.X / 2, 0),
+				Middle = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2),
+				Bottom = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+			}[obj.TracerOrigin or "Bottom"]
 
-    if config.ShowHighlightOutline or config.ShowHighlightFill then
-        data.highlight = createHighlight(target)
-    end
+			obj.TracerLine.From = origin
+			obj.TracerLine.To = Vector2.new(screenPos.X, screenPos.Y)
+			obj.TracerLine.Visible = onScreen
+		end
 
-    if config.ShowEntity2D then
-        data.entity2d = createEntity2D(target)
-    end
-
-    espObjects[target] = data
+		if obj.ESP2D and obj.ESP2D.Enabled then
+			local size = math.clamp(1000 / distance, 6, 40)
+			obj.ESP2D.Shape.Position = Vector2.new(screenPos.X - size / 2, screenPos.Y - size / 2)
+			obj.ESP2D.Shape.Size = Vector2.new(size, size)
+			obj.ESP2D.Shape.Visible = onScreen
+		end
+	end)
 end
 
-function module.RemoveESP(target)
-    local data = espObjects[target]
-    if not data then return end
+local ESP = {}
 
-    if data.tracer then data.tracer:Remove() end
-    if data.nameGui then data.nameGui:Destroy() end
-    if data.highlight then data.highlight:Destroy() end
-    if data.entity2d then data.entity2d:Destroy() end
+function ESP.AddESP(settings)
+	local target = settings.Target
+	if not target then return end
 
-    espObjects[target] = nil
+	local holder = {
+		Adornee = target,
+		Name = settings.Name or "ESP",
+	}
+
+	-- Highlight
+	if settings.HighlightOutline or settings.HighlightFill then
+		createHighlight(target, settings.HighlightFill, settings.HighlightOutline, settings.Color or Color3.fromRGB(255,255,255))
+	end
+
+	-- Name & Distance
+	if settings.Name or settings.ShowDistance then
+		holder.Text = createTextLabel(settings.Name or "ESP")
+	end
+
+	-- Tracer
+	if settings.Tracer then
+		holder.Tracer = true
+		holder.TracerOrigin = settings.TracerOrigin or "Bottom"
+		holder.TracerLine = createLine()
+	end
+
+	-- ESP2D
+	if settings.ESP2D and settings.ESP2D.Enabled then
+		holder.ESP2D = {
+			Enabled = true,
+			Shape = createESP2D(settings.ESP2D.Shape, settings.ESP2D.Color or Color3.fromRGB(255, 255, 255))
+		}
+	end
+
+	connections[holder] = {}
+	updateESP(holder)
+	table.insert(espObjects, holder)
 end
 
-function module.SetConfig(cfg)
-    for k, v in pairs(cfg) do
-        if config[k] ~= nil then
-            config[k] = v
-        end
-    end
+function ESP.RemoveAll()
+	for _, esp in pairs(espObjects) do
+		if esp.Text then pcall(function() esp.Text:Remove() end) end
+		if esp.TracerLine then pcall(function() esp.TracerLine:Remove() end) end
+		if esp.ESP2D and esp.ESP2D.Shape then pcall(function() esp.ESP2D.Shape:Remove() end) end
+	end
+	for _, c in pairs(connections) do
+		if c.RenderStepped then c.RenderStepped:Disconnect() end
+	end
+	for _, e in pairs(workspace:GetDescendants()) do
+		if e:IsA("Highlight") and e.Name == "_ESPHighlight" then e:Destroy() end
+	end
+	espObjects = {}
+	connections = {}
 end
 
-return module
+return ESP
