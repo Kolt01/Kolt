@@ -15,6 +15,10 @@ local ESP = {
         ShowDistance = true,
         ShowEntity2D = false,
     },
+    Distance = {
+        Min = 0,     -- Distância mínima (em studs)
+        Max = 1000,  -- Distância máxima (em studs)
+    },
     Objects = {},
     Entity2D = {
         Shape = "Cylinder", -- Cylinder, Ball
@@ -56,7 +60,7 @@ function ESP:AddESP(object, displayName, color)
         local tracer = Drawing.new("Line")
         tracer.Thickness = 1.5
         tracer.Color = color or Color3.fromRGB(255, 255, 255)
-        tracer.Visible = self.Settings.ShowTracer
+        tracer.Visible = false
         espData.Tracer = tracer
 
         local text = Drawing.new("Text")
@@ -64,7 +68,7 @@ function ESP:AddESP(object, displayName, color)
         text.Center = true
         text.Outline = true
         text.Color = color or Color3.fromRGB(255, 255, 255)
-        text.Visible = self.Settings.ShowName or self.Settings.ShowDistance
+        text.Visible = false
         espData.Text = text
     end
 
@@ -100,6 +104,15 @@ function ESP:AddESP(object, displayName, color)
         end
 
         local pos = target.Position
+        local dist = getDistanceFromPlayer(pos)
+        if dist < (ESP.Distance.Min or 0) or dist > (ESP.Distance.Max or 9999) then
+            if espData.Highlight then espData.Highlight.Enabled = false end
+            if espData.Shape then espData.Shape.Visible = false end
+            if espData.Tracer then espData.Tracer.Visible = false end
+            if espData.Text then espData.Text.Visible = false end
+            return
+        end
+
         local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
         local origin = Camera.ViewportSize / 2
         if self.TracerOrigin == "Top" then origin = Vector2.new(origin.X, 0)
@@ -108,13 +121,15 @@ function ESP:AddESP(object, displayName, color)
 
         if self.Objects[object] then
             local data = self.Objects[object]
+            -- Highlight visível dentro da distância
+            if data.Highlight then data.Highlight.Enabled = true end
+            if data.Shape then data.Shape.Visible = true end
             if data.Tracer then
                 data.Tracer.Visible = onScreen and self.Settings.ShowTracer
                 data.Tracer.From = origin
                 data.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
             end
             if data.Text then
-                local dist = getDistanceFromPlayer(pos)
                 local text = ""
                 if self.Settings.ShowName then text = text .. displayName end
                 if self.Settings.ShowDistance then
