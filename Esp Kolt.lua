@@ -18,15 +18,13 @@ local ESP = {
         Outline = true,
         MinDistance = 0,
         MaxDistance = 300,
+        ShowHighlightOutline = false,
+        ShowHighlightFill = false,
     },
     Objects = {}
 }
 
--- Função que resolve input para objeto Roblox
--- Pode receber:
--- 1) string path: ex "workspace.CurrentRooms['0'].Door.Door"
--- 2) tabela {Parent = obj, Name = "nomeDoFilho"}
--- 3) objeto Roblox direto
+-- Resolve input para Roblox Instance
 function ESP:ResolvePath(input)
     if typeof(input) == "Instance" then
         return input
@@ -43,7 +41,6 @@ function ESP:ResolvePath(input)
         end
         return result
     elseif type(input) == "table" then
-        -- tenta buscar filho pelo nome
         if input.Parent and typeof(input.Parent) == "Instance" and type(input.Name) == "string" then
             return input.Parent:FindFirstChild(input.Name)
         end
@@ -53,26 +50,22 @@ function ESP:ResolvePath(input)
     end
 end
 
--- Utilitários
+-- Pega a parte principal (root) do objeto
 local function getRootPart(obj)
     return obj and obj:IsA("Model") and obj:FindFirstChildWhichIsA("BasePart") or obj
 end
 
-local function isVisible(part)
-    if not part then return false end
-    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
-    return onScreen and pos.Z > 0
-end
-
+-- Converte mundo para tela
 local function worldToScreen(part)
     return Camera:WorldToViewportPoint(part.Position)
 end
 
+-- Distância câmera para posição
 local function getDistance(pos)
     return (Camera.CFrame.Position - pos).Magnitude
 end
 
--- Criar ESP
+-- Adiciona ESP em objeto
 function ESP:Add(input, customName)
     local object = ESP:ResolvePath(input)
     if not object then return end
@@ -86,7 +79,7 @@ function ESP:Add(input, customName)
         Object = object,
         Name = Drawing.new("Text"),
         Distance = Drawing.new("Text"),
-        Tracer = Drawing.new("Line")
+        Tracer = Drawing.new("Line"),
     }
 
     for _, d in pairs({esp.Name, esp.Distance}) do
@@ -104,64 +97,20 @@ function ESP:Add(input, customName)
     esp.Tracer.Color = ESP.Settings.TracerColor
     esp.Tracer.Thickness = 1
 
-    ESP.Objects[object] = esp
-
-    if ESP.Settings.ShowTracer3D then
-        ESP:Create3DTracer(object, ESP.Settings.TracerColor)
-    end
-
-    if customName then
-        esp.Name.Text = customName
-    end
-end
-
-function ESP:Add(input, customName)
-    local object = ESP:ResolvePath(input)
-    if not object then return end
-
-    local root = getRootPart(object)
-    if not root then return end
-
-    if ESP.Objects[object] then return end -- evita duplicação
-
-    local esp = {
-        Object = object,
-        Name = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        Tracer = Drawing.new("Line")
-    }
-
-    for _, d in pairs({esp.Name, esp.Distance}) do
-        d.Visible = false
-        d.Center = true
-        d.Font = ESP.Settings.Font
-        d.Size = ESP.Settings.Size
-        d.Outline = ESP.Settings.Outline
-    end
-
-    esp.Name.Color = ESP.Settings.TracerColor
-    esp.Distance.Color = ESP.Settings.TracerColor
-
-    esp.Tracer.Visible = false
-    esp.Tracer.Color = ESP.Settings.TracerColor
-    esp.Tracer.Thickness = 1
-
-    -- Adiciona highlight se ativado nas configurações
+    -- Highlight (opcional)
     if ESP.Settings.ShowHighlightOutline or ESP.Settings.ShowHighlightFill then
         if object:IsA("Model") and not object.PrimaryPart then
             object.PrimaryPart = getRootPart(object)
         end
-
         local highlight = Instance.new("Highlight")
         highlight.Name = "ESP_Highlight"
         highlight.Adornee = object
         highlight.FillColor = ESP.Settings.TracerColor
-        highlight.OutlineColor = Color3.new(0, 0, 0)
+        highlight.OutlineColor = Color3.new(0,0,0)
         highlight.FillTransparency = ESP.Settings.ShowHighlightFill and 0.5 or 1
         highlight.OutlineTransparency = ESP.Settings.ShowHighlightOutline and 0 or 1
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         highlight.Parent = object
-
         esp.Highlight = highlight
     end
 
@@ -175,7 +124,8 @@ function ESP:Add(input, customName)
         esp.Name.Text = customName
     end
 end
--- Remover ESP
+
+-- Remove ESP do objeto
 function ESP:Remove(input)
     local object = ESP:ResolvePath(input)
     if not object then return end
@@ -184,21 +134,23 @@ function ESP:Remove(input)
     if not esp then return end
 
     for _, d in pairs({esp.Name, esp.Distance, esp.Tracer}) do
-        if d and d.Remove then d:Remove() end
+        if d and d.Remove then
+            d:Remove()
+        end
     end
 
     if esp.Beam3D then pcall(function() esp.Beam3D:Destroy() end) end
     if esp.OriginAttachment then pcall(function() esp.OriginAttachment:Destroy() end) end
     if esp.TargetAttachment then pcall(function() esp.TargetAttachment:Destroy() end) end
 
-if esp.Highlight then
-    pcall(function() esp.Highlight:Destroy() end)
-end
+    if esp.Highlight then
+        pcall(function() esp.Highlight:Destroy() end)
+    end
 
     ESP.Objects[object] = nil
 end
 
--- Tracer 3D via Beam
+-- Cria tracer 3D
 function ESP:Create3DTracer(object, color)
     local root = getRootPart(object)
     if not root then return end
@@ -216,7 +168,7 @@ function ESP:Create3DTracer(object, color)
     beam.Attachment1 = target
     beam.Width0 = 0.1
     beam.Width1 = 0.1
-    beam.Color = ColorSequence.new(color or Color3.new(1, 1, 1))
+    beam.Color = ColorSequence.new(color or Color3.new(1,1,1))
     beam.FaceCamera = true
     beam.AlwaysOnTop = true
     beam.Name = "_ESP_Beam"
@@ -229,7 +181,19 @@ function ESP:Create3DTracer(object, color)
     end
 end
 
--- Atualizador
+-- Limpa todos ESP
+function ESP:Clear()
+    for object in pairs(ESP.Objects) do
+        ESP:Remove(object)
+    end
+end
+
+-- Ativa/desativa ESP
+function ESP:SetEnabled(state)
+    ESP.Enabled = state
+end
+
+-- Atualiza ESP toda render
 RunService.RenderStepped:Connect(function()
     if not ESP.Enabled then return end
 
@@ -254,7 +218,7 @@ RunService.RenderStepped:Connect(function()
         if ESP.Settings.ShowName then
             esp.Name.Position = Vector2.new(screenPos.X, screenPos.Y)
             if not esp.Name.Text or esp.Name.Text == "" then
-                esp.Name.Text = object.Name
+                esp.Name.Text = esp.Object.Name
             end
             esp.Name.Visible = true
         else
@@ -281,17 +245,5 @@ RunService.RenderStepped:Connect(function()
         end
     end
 end)
-
--- Limpar todos
-function ESP:Clear()
-    for object in pairs(ESP.Objects) do
-        ESP:Remove(object)
-    end
-end
-
--- Ativar/Desativar
-function ESP:SetEnabled(state)
-    ESP.Enabled = state
-end
 
 return ESP
