@@ -115,6 +115,66 @@ function ESP:Add(input, customName)
     end
 end
 
+function ESP:Add(input, customName)
+    local object = ESP:ResolvePath(input)
+    if not object then return end
+
+    local root = getRootPart(object)
+    if not root then return end
+
+    if ESP.Objects[object] then return end -- evita duplicação
+
+    local esp = {
+        Object = object,
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text"),
+        Tracer = Drawing.new("Line")
+    }
+
+    for _, d in pairs({esp.Name, esp.Distance}) do
+        d.Visible = false
+        d.Center = true
+        d.Font = ESP.Settings.Font
+        d.Size = ESP.Settings.Size
+        d.Outline = ESP.Settings.Outline
+    end
+
+    esp.Name.Color = ESP.Settings.TracerColor
+    esp.Distance.Color = ESP.Settings.TracerColor
+
+    esp.Tracer.Visible = false
+    esp.Tracer.Color = ESP.Settings.TracerColor
+    esp.Tracer.Thickness = 1
+
+    -- Adiciona highlight se ativado nas configurações
+    if ESP.Settings.ShowHighlightOutline or ESP.Settings.ShowHighlightFill then
+        if object:IsA("Model") and not object.PrimaryPart then
+            object.PrimaryPart = getRootPart(object)
+        end
+
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ESP_Highlight"
+        highlight.Adornee = object
+        highlight.FillColor = ESP.Settings.TracerColor
+        highlight.OutlineColor = Color3.new(0, 0, 0)
+        highlight.FillTransparency = ESP.Settings.ShowHighlightFill and 0.5 or 1
+        highlight.OutlineTransparency = ESP.Settings.ShowHighlightOutline and 0 or 1
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = object
+
+        esp.Highlight = highlight
+    end
+
+    ESP.Objects[object] = esp
+
+    if ESP.Settings.ShowTracer3D then
+        ESP:Create3DTracer(object, ESP.Settings.TracerColor)
+    end
+
+    if customName then
+        esp.Name.Text = customName
+    end
+end
 -- Remover ESP
 function ESP:Remove(input)
     local object = ESP:ResolvePath(input)
@@ -130,6 +190,10 @@ function ESP:Remove(input)
     if esp.Beam3D then pcall(function() esp.Beam3D:Destroy() end) end
     if esp.OriginAttachment then pcall(function() esp.OriginAttachment:Destroy() end) end
     if esp.TargetAttachment then pcall(function() esp.TargetAttachment:Destroy() end) end
+
+if esp.Highlight then
+    pcall(function() esp.Highlight:Destroy() end)
+end
 
     ESP.Objects[object] = nil
 end
