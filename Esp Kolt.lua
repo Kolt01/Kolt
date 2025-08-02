@@ -63,7 +63,39 @@ function ESPEntity:Set(prop, value)
 end
 
 function ESP:Add(opts)
-    assert(opts.Object and opts.Object:IsA("BasePart"), "ESP:Add requires a BasePart")
+    assert(opts.Object and opts.Object:IsA("Instance"), "ESP:Add requires an Instance")
+
+    local basePart = nil
+
+    -- Se for BasePart direto
+    if opts.Object:IsA("BasePart") then
+        basePart = opts.Object
+
+    -- Se for Model com PrimaryPart
+    elseif opts.Object:IsA("Model") and opts.Object.PrimaryPart then
+        basePart = opts.Object.PrimaryPart
+
+    -- Se for qualquer outro container
+    else
+        local function findFirstBasePart(container)
+            local candidates = {}
+            for _, v in ipairs(container:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    table.insert(candidates, v)
+                end
+            end
+            table.sort(candidates, function(a, b)
+                return (Camera.CFrame.Position - a.Position).Magnitude < (Camera.CFrame.Position - b.Position).Magnitude
+            end)
+            return candidates[1]
+        end
+
+        basePart = findFirstBasePart(opts.Object)
+        if not basePart then
+            warn("[ESP] Nenhum BasePart encontrado em", opts.Object:GetFullName())
+            return
+        end
+    end
 
     local highlight = Instance.new("Highlight")
     highlight.Adornee = opts.Object:FindFirstAncestorWhichIsA("Model") or opts.Object
@@ -72,10 +104,10 @@ function ESP:Add(opts)
     highlight.FillTransparency = 1
     highlight.OutlineTransparency = 0
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent = opts.Object
+    highlight.Parent = basePart
 
     local entity = setmetatable({
-        Object = opts.Object,
+        Object = basePart,
         Settings = table.clone(defaultSettings),
         Highlight = highlight,
         NameLabel = createDrawingText(2),
@@ -126,34 +158,36 @@ RunService.RenderStepped:Connect(function()
         else
             entity.Highlight.FillTransparency = 1
         end
+-- Agrupar os labels verticalmente abaixo do objeto
+local baseX = screenPos.X
+local baseY = screenPos.Y + 6
 
-        -- Update Name Label
-        if settings.ShowName and onScreen then
-            entity.NameLabel.Position = Vector2.new(screenPos.X, screenPos.Y - 16)
-            entity.NameLabel.Text = settings.Label or part.Name
-            entity.NameLabel.Visible = true
-        else
-            entity.NameLabel.Visible = false
-        end
+-- Update Name Label
+if settings.ShowName and onScreen then
+    entity.NameLabel.Position = Vector2.new(baseX, baseY)
+    entity.NameLabel.Text = settings.Label or part.Name
+    entity.NameLabel.Visible = true
+else
+    entity.NameLabel.Visible = false
+end
 
-        -- Update Distance Label
-        if settings.ShowDistance and onScreen then
-            entity.DistanceLabel.Position = Vector2.new(screenPos.X, screenPos.Y + 4)
-            entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
-            entity.DistanceLabel.Visible = true
-        else
-            entity.DistanceLabel.Visible = false
-        end
+-- Update Distance Label logo abaixo do nome
+if settings.ShowDistance and onScreen then
+    entity.DistanceLabel.Position = Vector2.new(baseX, baseY + 14)
+    entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
+    entity.DistanceLabel.Visible = true
+else
+    entity.DistanceLabel.Visible = false
+end
 
-        -- Update Tracer
-        if settings.ShowTracer and onScreen then
-            entity.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-            entity.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-            entity.Tracer.Color = settings.TracerColor
-            entity.Tracer.Visible = true
-        else
-            entity.Tracer.Visible = false
-        end
+-- Update Distance Label logo abaixo do nome
+if settings.ShowDistance and onScreen then
+    entity.DistanceLabel.Position = Vector2.new(labelX, labelY + 14)
+    entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
+    entity.DistanceLabel.Visible = true
+else
+    entity.DistanceLabel.Visible = false
+end
     end
 end)
 
