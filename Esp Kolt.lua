@@ -12,7 +12,7 @@ local ESP = {
         ShowName = true,
         ShowDistance = true,
         TracerColor = Color3.new(1, 1, 1),
-        Font = Drawing.Fonts.UI, -- pode mudar para Arcade, System, Plex, Gotham se quiser
+        Font = Drawing.Fonts.UI, -- Arcade, System, Plex, Gotham são opções
         Size = 13,
         DistanceOffset = Vector2.new(0, 15),
         Outline = true,
@@ -57,7 +57,7 @@ local function getRootPart(obj)
         if obj.PrimaryPart then
             return obj.PrimaryPart
         else
-            return obj:FindFirstChildWhichIsA("BasePart")
+            return obj:FindFirstChildWhichIsA("BasePart", true) -- busca recursiva
         end
     elseif obj and obj:IsA("BasePart") then
         return obj
@@ -73,8 +73,11 @@ local function getDistance(pos)
     return (Camera.CFrame.Position - pos).Magnitude
 end
 
--- Cria highlight estilo hub
 local function CreateHighlight(target)
+    -- Evita criar highlight duplicado
+    local existing = target:FindFirstChild("ESP_Highlight")
+    if existing then return existing end
+
     local highlight = Instance.new("Highlight")
     highlight.Name = "ESP_Highlight"
     highlight.Adornee = target
@@ -137,7 +140,6 @@ function ESP:Add(input, customName)
 
     esp.Name.Text = customName or object.Name
 
-    -- Highlight
     if ESP.Settings.ShowHighlightOutline or ESP.Settings.ShowHighlightFill then
         esp.Highlight = CreateHighlight(object)
     end
@@ -218,7 +220,6 @@ RunService.RenderStepped:Connect(function()
 
     local viewportSize = Camera.ViewportSize
 
-    -- Define o ponto de origem do tracer
     local function getTracerOrigin()
         if ESP.TracerOrigin == "Top" then
             return Vector2.new(viewportSize.X/2, viewportSize.Y * 0.1)
@@ -239,10 +240,9 @@ RunService.RenderStepped:Connect(function()
         local root = getRootPart(object)
         if not root or not object:IsDescendantOf(workspace) then
             ESP:Remove(object)
-            continue
+            goto continue
         end
 
-        -- Ponto superior do objeto (usar BoundingBox)
         local cf = root.CFrame
         local size = root.Size
         local topPos = cf * Vector3.new(0, size.Y/2, 0)
@@ -258,7 +258,6 @@ RunService.RenderStepped:Connect(function()
             goto continue
         end
 
-        -- Nome
         if ESP.Settings.ShowName then
             esp.Name.Position = Vector2.new(screenPos.X, screenPos.Y)
             esp.Name.Visible = true
@@ -266,7 +265,6 @@ RunService.RenderStepped:Connect(function()
             esp.Name.Visible = false
         end
 
-        -- Distância
         if ESP.Settings.ShowDistance then
             esp.Distance.Position = Vector2.new(screenPos.X, screenPos.Y) + ESP.Settings.DistanceOffset
             esp.Distance.Text = tostring(dist) .. "m"
@@ -275,7 +273,6 @@ RunService.RenderStepped:Connect(function()
             esp.Distance.Visible = false
         end
 
-        -- Tracer 2D
         if ESP.Settings.ShowTracer2D then
             local fromPos = getTracerOrigin()
             esp.Tracer.From = fromPos
@@ -283,7 +280,6 @@ RunService.RenderStepped:Connect(function()
             esp.Tracer.Color = ESP.Settings.TracerColor
             esp.Tracer.Visible = true
 
-            -- Dot na origem
             esp.TracerDot.Position = fromPos
             esp.TracerDot.Color = ESP.Settings.TracerColor
             esp.TracerDot.Visible = true
@@ -297,4 +293,3 @@ RunService.RenderStepped:Connect(function()
 end)
 
 return ESP
-----------------------END-------------------------------------
