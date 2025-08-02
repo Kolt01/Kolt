@@ -1,300 +1,158 @@
+-- ESP Library by Dhiogo (orientada a endereço)
 local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
+local Players = game:GetService("Players")
 
 local ESP = {
     Enabled = true,
-    TracerOrigin = "Bottom", -- Opções: "Top", "Center", "Bottom", "LeftInferior", "RightInferior"
-    Settings = {
-        ShowTracer2D = true,
-        ShowTracer3D = false,
-        ShowName = true,
-        ShowDistance = true,
-        TracerColor = Color3.new(1, 1, 1),
-        -- Font agora é string que referencia a Fonts disponíveis
-        Font = "UI",
-        Fonts = {
-            UI = Drawing.Fonts.UI,
-            System = Drawing.Fonts.System,
-            Plex = Drawing.Fonts.Plex,
-            Fantasy = Drawing.Fonts.Fantasy,
-            Monospace = Drawing.Fonts.Monospace,
-        },
-        Size = 13,
-        DistanceOffset = Vector2.new(0, 15),
-        Outline = true,
-        MinDistance = 0,
-        MaxDistance = 300,
-        ShowHighlightOutline = false,
-        ShowHighlightFill = false,
-    },
-    Objects = {}
+    Entities = {},
 }
 
--- Resolve input para Roblox Instance (sem alteração)
-function ESP:ResolvePath(input)
-    if typeof(input) == "Instance" then
-        return input
-    elseif type(input) == "string" then
-        local func, err = loadstring("return " .. input)
-        if not func then
-            warn("Falha ao compilar path: "..tostring(err))
-            return nil
-        end
-        local ok, result = pcall(func)
-        if not ok then
-            warn("Falha ao executar path: "..tostring(result))
-            return nil
-        end
-        return result
-    elseif type(input) == "table" then
-        if input.Parent and typeof(input.Parent) == "Instance" and type(input.Name) == "string" then
-            return input.Parent:FindFirstChild(input.Name)
-        end
-        return nil
+local defaultSettings = {
+    ChamsOutline = true,
+    ChamsFilled = false,
+    ShowName = true,
+    ShowDistance = true,
+    ShowTracer = true,
+    TracerColor = Color3.fromRGB(255, 255, 255),
+    TracerOrigin = "Bottom",
+    Label = nil,
+}
+
+local function createDrawingText(zIndex)
+    local text = Drawing.new("Text")
+    text.Size = 13
+    text.Center = true
+    text.Outline = true
+    text.Font = 2
+    text.Visible = false
+    text.ZIndex = zIndex or 1
+    return text
+end
+
+local function createLine()
+    local line = Drawing.new("Line")
+    line.Thickness = 1.5
+    line.Color = Color3.fromRGB(255,255,255)
+    line.Transparency = 1
+    line.Visible = false
+    return line
+end
+
+local function getOriginPos(part, originType)
+    local cf, size = part.CFrame, part.Size
+    if originType == "Top" then
+        return cf.Position + Vector3.new(0, size.Y / 2, 0)
+    elseif originType == "Center" then
+        return cf.Position
+    elseif originType == "Bottom" then
+        return cf.Position - Vector3.new(0, size.Y / 2, 0)
     else
-        return nil
+        return cf.Position
     end
 end
 
-local function getRootPart(obj)
-    return obj and obj:IsA("Model") and obj:FindFirstChildWhichIsA("BasePart") or obj
-end
+-- ESP Entity Wrapper
+local ESPEntity = {}
+ESPEntity.__index = ESPEntity
 
-local function worldToScreen(part)
-    return Camera:WorldToViewportPoint(part.Position)
-end
-
-local function getDistance(pos)
-    return (Camera.CFrame.Position - pos).Magnitude
-end
-
--- Calcula a posição da origem do tracer no viewport, considerando o setting e Highlight
-local function getTracerOriginPosition(esp)
-    local settings = ESP.Settings
-    local viewportSize = Camera.ViewportSize
-
-    if esp.Highlight and settings.ShowHighlightOutline then
-        -- Usa topo do BoundingBox do Highlight (ou PrimaryPart)
-        local root = getRootPart(esp.Object)
-        if root then
-            local cframe, size = root:GetBoundingBox()
-            local topPos = cframe.Position + Vector3.new(0, size.Y/2, 0)
-            local screenPos, onScreen = Camera:WorldToViewportPoint(topPos)
-            if onScreen then
-                return Vector2.new(screenPos.X, screenPos.Y)
-            end
-        end
-    end
-
-    -- Se não tem highlight ou não está visível, calcula baseado na opção TracerOrigin
-    local cx, cy = viewportSize.X/2, viewportSize.Y -- default Bottom center
-    if ESP.TracerOrigin == "Bottom" then
-        return Vector2.new(cx, viewportSize.Y)
-    elseif ESP.TracerOrigin == "Center" then
-        return Vector2.new(cx, viewportSize.Y/2)
-    elseif ESP.TracerOrigin == "Top" then
-        return Vector2.new(cx, 0)
-    elseif ESP.TracerOrigin == "LeftInferior" then
-        return Vector2.new(0, viewportSize.Y)
-    elseif ESP.TracerOrigin == "RightInferior" then
-        return Vector2.new(viewportSize.X, viewportSize.Y)
-    else
-        -- default Bottom
-        return Vector2.new(cx, viewportSize.Y)
+function ESPEntity:Set(prop, value)
+    if self.Settings[prop] ~= nil then
+        self.Settings[prop] = value
     end
 end
 
--- Modificação na função Add para criar o círculo da origem do tracer
-function ESP:Add(input, customName)
-    local object = ESP:ResolvePath(input)
-    if not object then return end
+function ESP:Add(opts)
+    assert(opts.Object and opts.Object:IsA("BasePart"), "ESP:Add requires a BasePart")
 
-    local root = getRootPart(object)
-    if not root then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = opts.Object:FindFirstAncestorWhichIsA("Model") or opts.Object
+    highlight.FillColor = opts.Color or Color3.fromRGB(255, 255, 255)
+    highlight.OutlineColor = Color3.new(0, 0, 0)
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = opts.Object
 
-    if ESP.Objects[object] then return end -- evita duplicação
+    local entity = setmetatable({
+        Object = opts.Object,
+        Settings = table.clone(defaultSettings),
+        Highlight = highlight,
+        NameLabel = createDrawingText(2),
+        DistanceLabel = createDrawingText(1),
+        Tracer = createLine(),
+    }, ESPEntity)
 
-    local esp = {
-        Object = object,
-        Name = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        Tracer = Drawing.new("Line"),
-        TracerOriginDot = Drawing.new("Circle"), -- Círculo do ponto de origem
-    }
-
-    for _, d in pairs({esp.Name, esp.Distance}) do
-        d.Visible = false
-        d.Center = true
-        -- Escolhe fonte via string e tabela Fonts
-        d.Font = ESP.Settings.Fonts[ESP.Settings.Font] or Drawing.Fonts.UI
-        d.Size = ESP.Settings.Size
-        d.Outline = ESP.Settings.Outline
+    if opts.Label then entity.Settings.Label = opts.Label end
+    if opts.Color then
+        highlight.FillColor = opts.Color
+        entity.Tracer.Color = opts.Color
     end
 
-    esp.Name.Color = ESP.Settings.TracerColor
-    esp.Distance.Color = ESP.Settings.TracerColor
-
-    esp.Tracer.Visible = false
-    esp.Tracer.Color = ESP.Settings.TracerColor
-    esp.Tracer.Thickness = 1
-
-    -- Configura círculo do ponto de origem
-    esp.TracerOriginDot.Visible = false
-    esp.TracerOriginDot.Color = ESP.Settings.TracerColor
-    esp.TracerOriginDot.Thickness = 1
-    esp.TracerOriginDot.NumSides = 16
-    esp.TracerOriginDot.Radius = 4
-    esp.TracerOriginDot.Filled = true
-
-    -- Highlight (opcional)
-    if ESP.Settings.ShowHighlightOutline or ESP.Settings.ShowHighlightFill then
-        if object:IsA("Model") and not object.PrimaryPart then
-            object.PrimaryPart = getRootPart(object)
-        end
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "ESP_Highlight"
-        highlight.Adornee = object
-        highlight.FillColor = ESP.Settings.TracerColor
-        highlight.OutlineColor = Color3.new(0, 0, 0)
-        highlight.FillTransparency = ESP.Settings.ShowHighlightFill and 0.5 or 1
-        highlight.OutlineTransparency = ESP.Settings.ShowHighlightOutline and 0 or 1
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Parent = object
-        esp.Highlight = highlight
-    end
-
-    ESP.Objects[object] = esp
-
-    if ESP.Settings.ShowTracer3D then
-        ESP:Create3DTracer(object, ESP.Settings.TracerColor)
-    end
-
-    if customName then
-        esp.Name.Text = customName
-    end
-end
-
-function ESP:Remove(input)
-    local object = ESP:ResolvePath(input)
-    if not object then return end
-
-    local esp = ESP.Objects[object]
-    if not esp then return end
-
-    for _, d in pairs({esp.Name, esp.Distance, esp.Tracer, esp.TracerOriginDot}) do
-        if d and d.Remove then
-            d:Remove()
-        end
-    end
-
-    if esp.Beam3D then pcall(function() esp.Beam3D:Destroy() end) end
-    if esp.OriginAttachment then pcall(function() esp.OriginAttachment:Destroy() end) end
-    if esp.TargetAttachment then pcall(function() esp.TargetAttachment:Destroy() end) end
-
-    if esp.Highlight then
-        pcall(function() esp.Highlight:Destroy() end)
-    end
-
-    ESP.Objects[object] = nil
-end
-
-function ESP:Create3DTracer(object, color)
-    local root = getRootPart(object)
-    if not root then return end
-
-    local origin = Instance.new("Attachment")
-    origin.Name = "_ESP_Origin"
-    origin.Parent = Camera
-
-    local target = Instance.new("Attachment")
-    target.Name = "_ESP_Target"
-    target.Parent = root
-
-    local beam = Instance.new("Beam")
-    beam.Attachment0 = origin
-    beam.Attachment1 = target
-    beam.Width0 = 0.1
-    beam.Width1 = 0.1
-    beam.Color = ColorSequence.new(color or Color3.new(1, 1, 1))
-    beam.FaceCamera = true
-    beam.AlwaysOnTop = true
-    beam.Name = "_ESP_Beam"
-    beam.Parent = origin
-
-    if ESP.Objects[object] then
-        ESP.Objects[object].Beam3D = beam
-        ESP.Objects[object].OriginAttachment = origin
-        ESP.Objects[object].TargetAttachment = target
-    end
-end
-
-function ESP:Clear()
-    for object in pairs(ESP.Objects) do
-        ESP:Remove(object)
-    end
-end
-
-function ESP:SetEnabled(state)
-    ESP.Enabled = state
+    table.insert(ESP.Entities, entity)
+    return entity
 end
 
 RunService.RenderStepped:Connect(function()
-    if not ESP.Enabled then return end
+    for i = #ESP.Entities, 1, -1 do
+        local entity = ESP.Entities[i]
+        local part = entity.Object
+        local settings = entity.Settings
 
-    for object, esp in pairs(ESP.Objects) do
-        local root = getRootPart(object)
-        if not root or not object:IsDescendantOf(workspace) then
-            ESP:Remove(object)
+        if not part or not part:IsDescendantOf(workspace) then
+            -- Cleanup
+            if entity.Highlight then entity.Highlight:Destroy() end
+            if entity.NameLabel then entity.NameLabel:Remove() end
+            if entity.DistanceLabel then entity.DistanceLabel:Remove() end
+            if entity.Tracer then entity.Tracer:Remove() end
+            table.remove(ESP.Entities, i)
             continue
         end
 
-        local screenPos, onScreen = worldToScreen(root)
-        local dist = math.floor(getDistance(root.Position))
+        -- Visibility Check
+        local originWorld = getOriginPos(part, settings.TracerOrigin)
+        local screenPos, onScreen = Camera:WorldToViewportPoint(originWorld)
+        local distance = (Camera.CFrame.Position - originWorld).Magnitude
 
-        if not onScreen or dist < ESP.Settings.MinDistance or dist > ESP.Settings.MaxDistance then
-            esp.Name.Visible = false
-            esp.Distance.Visible = false
-            esp.Tracer.Visible = false
-            esp.TracerOriginDot.Visible = false
-            continue
+        -- Update Highlight
+        if settings.ChamsOutline then
+            entity.Highlight.OutlineTransparency = 0
+        else
+            entity.Highlight.OutlineTransparency = 1
         end
 
-        -- Nome
-        if ESP.Settings.ShowName then
-            esp.Name.Position = Vector2.new(screenPos.X, screenPos.Y)
-            if not esp.Name.Text or esp.Name.Text == "" then
-                esp.Name.Text = esp.Object.Name
-            end
-            esp.Name.Visible = true
+        if settings.ChamsFilled then
+            entity.Highlight.FillTransparency = 0.5
         else
-            esp.Name.Visible = false
+            entity.Highlight.FillTransparency = 1
         end
 
-        -- Distância
-        if ESP.Settings.ShowDistance then
-            esp.Distance.Position = Vector2.new(screenPos.X, screenPos.Y) + ESP.Settings.DistanceOffset
-            esp.Distance.Text = tostring(dist) .. "m"
-            esp.Distance.Visible = true
+        -- Update Name Label
+        if settings.ShowName and onScreen then
+            entity.NameLabel.Position = Vector2.new(screenPos.X, screenPos.Y - 16)
+            entity.NameLabel.Text = settings.Label or part.Name
+            entity.NameLabel.Visible = true
         else
-            esp.Distance.Visible = false
+            entity.NameLabel.Visible = false
         end
 
-        -- Tracer 2D
-        if ESP.Settings.ShowTracer2D then
-            local originPos = getTracerOriginPosition(esp)
-
-            esp.Tracer.From = originPos
-            esp.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-            esp.Tracer.Visible = true
-
-            -- Bolinha no ponto de origem do tracer
-            esp.TracerOriginDot.Position = originPos
-            esp.TracerOriginDot.Visible = true
+        -- Update Distance Label
+        if settings.ShowDistance and onScreen then
+            entity.DistanceLabel.Position = Vector2.new(screenPos.X, screenPos.Y + 4)
+            entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
+            entity.DistanceLabel.Visible = true
         else
-            esp.Tracer.Visible = false
-            esp.TracerOriginDot.Visible = false
+            entity.DistanceLabel.Visible = false
+        end
+
+        -- Update Tracer
+        if settings.ShowTracer and onScreen then
+            entity.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            entity.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            entity.Tracer.Color = settings.TracerColor
+            entity.Tracer.Visible = true
+        else
+            entity.Tracer.Visible = false
         end
     end
 end)
