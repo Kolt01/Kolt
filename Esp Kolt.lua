@@ -1,6 +1,6 @@
--- ESP Library by Dhiogo
+-- ESP Library by Dhiogo (com preenchimento material "Chams Material")
 -- Suporta Model e BasePart
--- Funcionalidades: Chams Outline, Chams Filled, Names, Distance, Tracer (Top, Center, Bottom)
+-- Funcionalidades: Chams Outline, Chams Filled, Chams Material, Names, Distance, Tracer (Top, Center, Bottom)
 -- Modificações via esp:Modify(type, property, value)
 
 local RunService = game:GetService("RunService")
@@ -23,6 +23,11 @@ ESP.Settings = {
     ChamsFillColor = Color3.new(0, 0, 0),
     ChamsFillTransparency = 0.7,
 
+    ShowChamsMaterial = false, -- NOVO: Ativa o preenchimento material (wallhack)
+    ChamsMaterialColor = Color3.new(0, 1, 0),
+    ChamsMaterialTransparency = 0.5,
+    ChamsMaterialMaterial = Enum.Material.Neon,
+
     ShowName = true,
     NameColor = Color3.new(1, 1, 1),
     NameTextSize = 14,
@@ -38,16 +43,14 @@ ESP.Settings = {
     TracerOrigin = "Bottom", -- Pode ser "Top", "Center" ou "Bottom"
 }
 
--- Tabela que armazenará as ESPs ativas: chave = objeto, valor = espInstance
+-- Armazena ESP ativas: chave=object, valor=espInstance
 ESP.Entities = {}
 
--- Função utilitária para criar Drawing objects
 local function CreateDrawing(type)
     local success, drawing = pcall(function() return Drawing.new(type) end)
     if success then return drawing else return nil end
 end
 
--- Função para obter posição do tracer na parte, de acordo com posição escolhida
 local function GetTracerPosition(part, position)
     local cf = part.CFrame
     local size = part.Size
@@ -58,26 +61,44 @@ local function GetTracerPosition(part, position)
     elseif position == "Bottom" then
         return (cf * CFrame.new(0, -size.Y/2, 0)).p
     else
-        return cf.p -- padrão Center
+        return cf.p
     end
 end
 
--- Cria uma nova ESP para um objeto
+-- Clona um BasePart para preencher com material translucido, retorna o clone
+local function CreateMaterialClone(part, settings)
+    if not part or not part:IsA("BasePart") then return nil end
+
+    local clone = part:Clone()
+    clone.Anchored = true
+    clone.CanCollide = false
+    clone.Transparency = settings.ChamsMaterialTransparency
+    clone.Material = settings.ChamsMaterialMaterial
+    clone.Color = settings.ChamsMaterialColor
+    clone.CastShadow = false
+    clone.Name = "ESPMaterialClone"
+    clone.Parent = workspace -- pode mudar se quiser
+
+    return clone
+end
+
+-- Remove clones criados
+local function RemoveMaterialClones(parent)
+    for _, child in ipairs(parent:GetChildren()) do
+        if child.Name == "ESPMaterialClone" then
+            child:Destroy()
+        end
+    end
+end
+
 function ESP.New(object)
     assert(object and (object:IsA("Model") or object:IsA("BasePart")),
         "ESP só suporta Model ou BasePart")
 
     local self = setmetatable({}, ESP)
-
     self.Object = object
-    self.Chams = nil
-    self.ChamsFill = nil
-    self.NameLabel = nil
-    self.DistanceLabel = nil
-    self.TracerLine = nil
-    self.TracerOriginCircle = nil
 
-    -- Cria Highlight para chams
+    -- Highlight para chams
     self.Highlight = Instance.new("Highlight")
     self.Highlight.Adornee = (object:IsA("Model") and object.PrimaryPart) or object
     self.Highlight.FillColor = ESP.Settings.ChamsFillColor
@@ -86,7 +107,10 @@ function ESP.New(object)
     self.Highlight.OutlineTransparency = 0
     self.Highlight.Parent = game:GetService("CoreGui")
 
-    -- Cria Drawing objects
+    -- Material clones
+    self.MaterialClones = {}
+
+    -- Drawing
     if ESP.Settings.ShowName then
         self.NameLabel = CreateDrawing("Text")
         self.NameLabel.Text = object.Name or "ESP"
@@ -123,36 +147,27 @@ function ESP.New(object)
         self.TracerOriginCircle.Visible = true
     end
 
-    -- Aplicar configurações iniciais ao Highlight
-    self.Highlight.FillColor = ESP.Settings.ChamsFillColor
-    self.Highlight.FillTransparency = ESP.Settings.ChamsFillTransparency
-    self.Highlight.OutlineColor = ESP.Settings.ChamsOutlineColor
-    self.Highlight.Enabled = ESP.Settings.ShowChamsOutline or ESP.Settings.ShowChamsFill
-
     return self
 end
 
--- Atualiza a ESP a cada frame
 function ESP:Update()
     if not self.Object or not self.Highlight or not self.Highlight.Parent then
         self:Remove()
         return
     end
 
-    -- Checa se objeto ainda existe no workspace
     if not (self.Object.Parent or (self.Object:IsA("Model") and self.Object.PrimaryPart and self.Object.PrimaryPart.Parent)) then
         self:Remove()
         return
     end
 
-    -- Posição base para o texto: centro do objeto (PrimaryPart se Model)
     local part = (self.Object:IsA("Model") and self.Object.PrimaryPart) or self.Object
     if not part then return end
 
     local rootPos = part.Position
     local cameraPos = Camera.CFrame.Position
 
-    -- Posição da etiqueta Nome (acima do objeto)
+    -- Nome
     if self.NameLabel and ESP.Settings.ShowName then
         local screenPos, onScreen = Camera:WorldToViewportPoint(rootPos + Vector3.new(0, part.Size.Y/2 + 0.5, 0))
         if onScreen then
@@ -184,7 +199,7 @@ function ESP:Update()
     -- Tracer
     if self.TracerLine and ESP.Settings.ShowTracer then
         local tracerPos3D = GetTracerPosition(part, ESP.Settings.TracerOrigin)
-        local origin2D = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y) -- base da tela (bottom-center)
+        local origin2D = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
         local screenPos, onScreen = Camera:WorldToViewportPoint(tracerPos3D)
 
         if onScreen then
@@ -208,16 +223,51 @@ function ESP:Update()
         end
     end
 
-    -- Highlight (Chams)
+    -- Highlight (Chams Outline e Fill)
     self.Highlight.Enabled = ESP.Settings.Enabled and (ESP.Settings.ShowChamsFill or ESP.Settings.ShowChamsOutline)
     if self.Highlight.Enabled then
         self.Highlight.FillColor = ESP.Settings.ChamsFillColor
         self.Highlight.FillTransparency = ESP.Settings.ChamsFillTransparency
         self.Highlight.OutlineColor = ESP.Settings.ChamsOutlineColor
     end
+
+    -- Chams Material (preenchimento material / wallhack)
+    if ESP.Settings.ShowChamsMaterial and ESP.Settings.Enabled then
+        -- Remove clones antigos
+        for _, clone in pairs(self.MaterialClones) do
+            if clone and clone.Parent then
+                clone:Destroy()
+            end
+        end
+        self.MaterialClones = {}
+
+        if self.Object:IsA("BasePart") then
+            local clone = CreateMaterialClone(self.Object, ESP.Settings)
+            if clone then
+                self.MaterialClones[clone] = clone
+            end
+        elseif self.Object:IsA("Model") and self.Object.PrimaryPart then
+            -- Clona todas BaseParts do Model
+            for _, v in pairs(self.Object:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    local clone = CreateMaterialClone(v, ESP.Settings)
+                    if clone then
+                        self.MaterialClones[clone] = clone
+                    end
+                end
+            end
+        end
+    else
+        -- Remove clones se desativado
+        for _, clone in pairs(self.MaterialClones) do
+            if clone and clone.Parent then
+                clone:Destroy()
+            end
+        end
+        self.MaterialClones = {}
+    end
 end
 
--- Remove a ESP
 function ESP:Remove()
     if self.NameLabel then
         self.NameLabel.Visible = false
@@ -248,10 +298,17 @@ function ESP:Remove()
         self.Highlight = nil
     end
 
+    -- Remove clones de material
+    for _, clone in pairs(self.MaterialClones) do
+        if clone and clone.Parent then
+            clone:Destroy()
+        end
+    end
+    self.MaterialClones = {}
+
     ESP.Entities[self.Object] = nil
 end
 
--- Adiciona objeto para ESP
 function ESP.Add(object)
     if ESP.Entities[object] then return ESP.Entities[object] end
     local espInstance = ESP.New(object)
@@ -259,7 +316,6 @@ function ESP.Add(object)
     return espInstance
 end
 
--- Remove objeto da ESP
 function ESP.Remove(object)
     if ESP.Entities[object] then
         ESP.Entities[object]:Remove()
@@ -267,7 +323,6 @@ function ESP.Remove(object)
     end
 end
 
--- Limpa todas ESPs
 function ESP.Clear()
     for obj, espInstance in pairs(ESP.Entities) do
         espInstance:Remove()
@@ -275,10 +330,6 @@ function ESP.Clear()
     ESP.Entities = {}
 end
 
--- Função para modificar configurações da ESP
--- type: string ("Tracer", "ChamsOutline", "ChamsFill", "Name", "Distance")
--- property: string (ex: "Color", "Thickness", "Transparency", "Position", "TextSize")
--- value: valor novo da propriedade
 function ESP.Modify(type, property, value)
     type = type:lower()
     property = property:lower()
@@ -289,13 +340,14 @@ function ESP.Modify(type, property, value)
         elseif property == "thickness" then
             ESP.Settings.TracerThickness = value
         elseif property == "origin" or property == "position" then
-            -- Aceita: "Top", "Center", "Bottom"
             if type(value) == "string" then
                 local v = value:lower()
                 if v == "top" or v == "center" or v == "bottom" then
                     ESP.Settings.TracerOrigin = value
                 end
             end
+        elseif property == "enabled" then
+            ESP.Settings.ShowTracer = value
         end
     elseif type == "chamsoutline" then
         if property == "color" then
@@ -312,6 +364,16 @@ function ESP.Modify(type, property, value)
             ESP.Settings.ChamsFillTransparency = value
         elseif property == "enabled" then
             ESP.Settings.ShowChamsFill = value
+        end
+    elseif type == "chamsmaterial" then
+        if property == "color" then
+            ESP.Settings.ChamsMaterialColor = value
+        elseif property == "transparency" then
+            ESP.Settings.ChamsMaterialTransparency = value
+        elseif property == "material" then
+            ESP.Settings.ChamsMaterialMaterial = value
+        elseif property == "enabled" then
+            ESP.Settings.ShowChamsMaterial = value
         end
     elseif type == "name" then
         if property == "color" then
@@ -336,16 +398,21 @@ function ESP.Modify(type, property, value)
     end
 end
 
--- Atualiza todas ESPs a cada frame
 RunService.RenderStepped:Connect(function()
     if not ESP.Settings.Enabled then
-        -- Esconde tudo se ESP estiver desabilitada
         for _, espInstance in pairs(ESP.Entities) do
             if espInstance.NameLabel then espInstance.NameLabel.Visible = false end
             if espInstance.DistanceLabel then espInstance.DistanceLabel.Visible = false end
             if espInstance.TracerLine then espInstance.TracerLine.Visible = false end
             if espInstance.TracerOriginCircle then espInstance.TracerOriginCircle.Visible = false end
             if espInstance.Highlight then espInstance.Highlight.Enabled = false end
+            -- Remove material clones
+            for _, clone in pairs(espInstance.MaterialClones or {}) do
+                if clone and clone.Parent then
+                    clone:Destroy()
+                end
+            end
+            espInstance.MaterialClones = {}
         end
         return
     end
