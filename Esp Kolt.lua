@@ -1,6 +1,3 @@
---LIBRAY
-
-
 -- Biblioteca ESP com suporte a FOV alto
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -29,25 +26,36 @@ local ESP = {
     },
 }
 
--- Correção de escala com base no FOV
+-- Escala com base no FOV
 local function getFOVScale()
     local defaultFOV = 70
-    if not Camera then return 1 end
-    return defaultFOV / Camera.FieldOfView
+    return Camera and (defaultFOV / Camera.FieldOfView) or 1
 end
 
+-- Distância até o jogador
 local function getDistanceFromPlayer(pos)
-    if not Camera or not Camera.CFrame then return 0 end
-    return (Camera.CFrame.Position - pos).Magnitude
+    return Camera and (Camera.CFrame.Position - pos).Magnitude or 0
+end
+
+-- Posição real do objeto
+local function getRealPosition(object)
+    if object:IsA("Model") then
+        return object:GetPivot().Position
+    elseif object:IsA("BasePart") or object:IsA("Attachment") then
+        return object.Position
+    end
+    return nil
 end
 
 function ESP:AddESP(object, displayName, color)
     if not object or self.Objects[object] then return end
-    local espData = { Parts = {} }
+
     local target = object:IsA("Model") and object:FindFirstChildWhichIsA("BasePart") or object
     if not target then return end
 
-    -- Destaque
+    local espData = { Object = object }
+
+    -- Highlight (robusto)
     if self.Settings.ShowHighlightOutline or self.Settings.ShowHighlightFill then
         local hl = Instance.new("Highlight")
         hl.Name = "ESP_Highlight"
@@ -61,7 +69,7 @@ function ESP:AddESP(object, displayName, color)
         espData.Highlight = hl
     end
 
-    -- Tracer e Texto
+    -- Desenho: Tracer + Texto
     if self.Settings.ShowTracer or self.Settings.ShowName or self.Settings.ShowDistance then
         local tracer = Drawing.new("Line")
         tracer.Thickness = 1.5
@@ -78,7 +86,7 @@ function ESP:AddESP(object, displayName, color)
         espData.Text = text
     end
 
-    -- Forma 2D simulada
+    -- Forma 2D simulada (opcional)
     if self.Settings.ShowEntity2D then
         local shape
         if self.Entity2D.Shape == "Cilindro" then
@@ -102,14 +110,16 @@ function ESP:AddESP(object, displayName, color)
 
     self.Objects[object] = espData
 
-    -- Loop de atualização
-    RunService.RenderStepped:Connect(function()
+    -- Atualização renderizada
+    espData.Connection = RunService.RenderStepped:Connect(function()
         if not object or not object.Parent then
             self:RemoveESP(object)
             return
         end
 
-        local pos = target.Position
+        local pos = getRealPosition(object)
+        if typeof(pos) ~= "Vector3" then return end
+
         local dist = getDistanceFromPlayer(pos)
         local scale = getFOVScale()
 
@@ -129,33 +139,31 @@ function ESP:AddESP(object, displayName, color)
             origin = Vector2.new(origin.X, Camera.ViewportSize.Y)
         end
 
-        local data = self.Objects[object]
-        if not data then return end
+        if espData.Highlight then espData.Highlight.Enabled = true end
 
-        if data.Highlight then data.Highlight.Enabled = true end
-        if data.Shape then
-            data.Shape.Visible = true
-            data.Shape.Radius = 2 * scale
-            data.Shape.Height = 4 * scale
+        if espData.Shape then
+            espData.Shape.Visible = true
+            espData.Shape.Radius = 2 * scale
+            espData.Shape.Height = 4 * scale
         end
 
-        if data.Tracer then
-            data.Tracer.Visible = onScreen and self.Settings.ShowTracer
-            data.Tracer.From = origin
-            data.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-            data.Tracer.Thickness = 1.5 * scale
+        if espData.Tracer then
+            espData.Tracer.Visible = onScreen and self.Settings.ShowTracer
+            espData.Tracer.From = origin
+            espData.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            espData.Tracer.Thickness = 1.5 * scale
         end
 
-        if data.Text then
-            local textContent = ""
-            if self.Settings.ShowName then textContent = textContent .. displayName end
+        if espData.Text then
+            local label = ""
+            if self.Settings.ShowName then label = label .. displayName end
             if self.Settings.ShowDistance then
-                textContent = textContent .. " [" .. math.floor(dist) .. "m]"
+                label = label .. " [" .. math.floor(dist) .. "m]"
             end
-            data.Text.Text = textContent
-            data.Text.Visible = onScreen
-            data.Text.Size = 14 * scale
-            data.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15 * scale)
+            espData.Text.Text = label
+            espData.Text.Visible = onScreen
+            espData.Text.Size = 14 * scale
+            espData.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15 * scale)
         end
     end)
 end
@@ -163,6 +171,7 @@ end
 function ESP:RemoveESP(object)
     local espData = self.Objects[object]
     if espData then
+        if espData.Connection then espData.Connection:Disconnect() end
         if espData.Highlight then pcall(function() espData.Highlight:Destroy() end) end
         if espData.Shape then pcall(function() espData.Shape:Destroy() end) end
         if espData.Tracer then pcall(function() espData.Tracer:Remove() end) end
