@@ -1,7 +1,6 @@
--- ESP Library by Dhiogo (orientada a endereço)
+-- ESP Library by Dhiogo (orientada a endereço real, sem buscas)
 local RunService = game:GetService("RunService")
 local Camera = workspace.CurrentCamera
-local Players = game:GetService("Players")
 
 local ESP = {
     Enabled = true,
@@ -15,7 +14,7 @@ local defaultSettings = {
     ShowDistance = true,
     ShowTracer = true,
     TracerColor = Color3.fromRGB(255, 255, 255),
-    TracerOrigin = "Bottom",
+    TracerOrigin = "Bottom", -- Top, Center, Bottom
     Label = nil,
 }
 
@@ -39,17 +38,27 @@ local function createLine()
     return line
 end
 
-local function getOriginPos(part, originType)
-    local cf, size = part.CFrame, part.Size
-    if originType == "Top" then
-        return cf.Position + Vector3.new(0, size.Y / 2, 0)
-    elseif originType == "Center" then
-        return cf.Position
-    elseif originType == "Bottom" then
-        return cf.Position - Vector3.new(0, size.Y / 2, 0)
-    else
-        return cf.Position
+local function getObjectPosition(obj, originType)
+    if obj:IsA("Model") then
+        local cf, size = obj:GetBoundingBox()
+        if originType == "Top" then
+            return cf.Position + Vector3.new(0, size.Y / 2, 0)
+        elseif originType == "Bottom" then
+            return cf.Position - Vector3.new(0, size.Y / 2, 0)
+        else
+            return cf.Position
+        end
+    elseif obj:IsA("BasePart") then
+        local cf, size = obj.CFrame, obj.Size
+        if originType == "Top" then
+            return cf.Position + Vector3.new(0, size.Y / 2, 0)
+        elseif originType == "Bottom" then
+            return cf.Position - Vector3.new(0, size.Y / 2, 0)
+        else
+            return cf.Position
+        end
     end
+    return nil
 end
 
 local ESPEntity = {}
@@ -61,48 +70,26 @@ function ESPEntity:Set(prop, value)
     end
 end
 
-local function findBestPart(object)
-    local parts = {}
-    for _, v in ipairs(object:GetDescendants()) do
-        if v:IsA("BasePart") and v:IsDescendantOf(workspace) then
-            table.insert(parts, v)
-        end
-    end
-    table.sort(parts, function(a, b)
-        return (Camera.CFrame.Position - a.Position).Magnitude < (Camera.CFrame.Position - b.Position).Magnitude
-    end)
-    return parts[1]
-end
-
 function ESP:Add(opts)
     assert(opts.Object and opts.Object:IsA("Instance"), "ESP:Add requires an Instance")
 
-    local basePart = nil
-    local adornee = opts.Object
-
-    if opts.Object:IsA("BasePart") then
-        basePart = opts.Object
-    elseif opts.Object:IsA("Model") and opts.Object.PrimaryPart then
-        basePart = opts.Object.PrimaryPart
-    else
-        basePart = findBestPart(opts.Object)
-        if not basePart then
-            warn("[ESP] Nenhum BasePart encontrado em", opts.Object:GetFullName())
-            return
-        end
+    local object = opts.Object
+    if not object:IsA("Model") and not object:IsA("BasePart") then
+        warn("[ESP] Tipo de objeto não suportado:", object.ClassName)
+        return
     end
 
     local highlight = Instance.new("Highlight")
-    highlight.Adornee = adornee:IsA("Model") and adornee or adornee:FindFirstAncestorWhichIsA("Model") or basePart
+    highlight.Adornee = object
     highlight.FillColor = opts.Color or Color3.fromRGB(255, 255, 255)
     highlight.OutlineColor = Color3.new(0, 0, 0)
     highlight.FillTransparency = 1
     highlight.OutlineTransparency = 0
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent = basePart
+    highlight.Parent = object:IsA("Model") and object.PrimaryPart or object
 
     local entity = setmetatable({
-        Object = basePart,
+        Object = object,
         Settings = table.clone(defaultSettings),
         Highlight = highlight,
         NameLabel = createDrawingText(2),
@@ -123,10 +110,10 @@ end
 RunService.RenderStepped:Connect(function()
     for i = #ESP.Entities, 1, -1 do
         local entity = ESP.Entities[i]
-        local part = entity.Object
+        local obj = entity.Object
         local settings = entity.Settings
 
-        if not part or not part:IsDescendantOf(workspace) then
+        if not obj or not obj:IsDescendantOf(workspace) then
             -- Cleanup
             if entity.Highlight then entity.Highlight:Destroy() end
             if entity.NameLabel then entity.NameLabel:Remove() end
@@ -136,27 +123,27 @@ RunService.RenderStepped:Connect(function()
             continue
         end
 
-        local originWorld = getOriginPos(part, settings.TracerOrigin)
-        local screenPos, onScreen = Camera:WorldToViewportPoint(originWorld)
-        local distance = (Camera.CFrame.Position - originWorld).Magnitude
+        local pos = getObjectPosition(obj, settings.TracerOrigin)
+        if not pos then continue end
 
-        -- Highlight
+        local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+        local distance = (Camera.CFrame.Position - pos).Magnitude
+
+        -- Highlight update
         entity.Highlight.OutlineTransparency = settings.ChamsOutline and 0 or 1
         entity.Highlight.FillTransparency = settings.ChamsFilled and 0.5 or 1
 
         -- Labels
-        local baseX, baseY = screenPos.X, screenPos.Y + 6
-
         if settings.ShowName and onScreen then
-            entity.NameLabel.Position = Vector2.new(baseX, baseY)
-            entity.NameLabel.Text = settings.Label or part.Name
+            entity.NameLabel.Position = Vector2.new(screenPos.X, screenPos.Y - 14)
+            entity.NameLabel.Text = settings.Label or obj.Name
             entity.NameLabel.Visible = true
         else
             entity.NameLabel.Visible = false
         end
 
         if settings.ShowDistance and onScreen then
-            entity.DistanceLabel.Position = Vector2.new(baseX, baseY + 14)
+            entity.DistanceLabel.Position = Vector2.new(screenPos.X, screenPos.Y + 2)
             entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
             entity.DistanceLabel.Visible = true
         else
