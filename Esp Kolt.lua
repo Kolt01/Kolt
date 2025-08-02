@@ -52,7 +52,6 @@ local function getOriginPos(part, originType)
     end
 end
 
--- ESP Entity Wrapper
 local ESPEntity = {}
 ESPEntity.__index = ESPEntity
 
@@ -62,35 +61,31 @@ function ESPEntity:Set(prop, value)
     end
 end
 
+local function findBestPart(object)
+    local parts = {}
+    for _, v in ipairs(object:GetDescendants()) do
+        if v:IsA("BasePart") and v:IsDescendantOf(workspace) then
+            table.insert(parts, v)
+        end
+    end
+    table.sort(parts, function(a, b)
+        return (Camera.CFrame.Position - a.Position).Magnitude < (Camera.CFrame.Position - b.Position).Magnitude
+    end)
+    return parts[1]
+end
+
 function ESP:Add(opts)
     assert(opts.Object and opts.Object:IsA("Instance"), "ESP:Add requires an Instance")
 
     local basePart = nil
+    local adornee = opts.Object
 
-    -- Se for BasePart direto
     if opts.Object:IsA("BasePart") then
         basePart = opts.Object
-
-    -- Se for Model com PrimaryPart
     elseif opts.Object:IsA("Model") and opts.Object.PrimaryPart then
         basePart = opts.Object.PrimaryPart
-
-    -- Se for qualquer outro container
     else
-        local function findFirstBasePart(container)
-            local candidates = {}
-            for _, v in ipairs(container:GetDescendants()) do
-                if v:IsA("BasePart") then
-                    table.insert(candidates, v)
-                end
-            end
-            table.sort(candidates, function(a, b)
-                return (Camera.CFrame.Position - a.Position).Magnitude < (Camera.CFrame.Position - b.Position).Magnitude
-            end)
-            return candidates[1]
-        end
-
-        basePart = findFirstBasePart(opts.Object)
+        basePart = findBestPart(opts.Object)
         if not basePart then
             warn("[ESP] Nenhum BasePart encontrado em", opts.Object:GetFullName())
             return
@@ -98,7 +93,7 @@ function ESP:Add(opts)
     end
 
     local highlight = Instance.new("Highlight")
-    highlight.Adornee = opts.Object:FindFirstAncestorWhichIsA("Model") or opts.Object
+    highlight.Adornee = adornee:IsA("Model") and adornee or adornee:FindFirstAncestorWhichIsA("Model") or basePart
     highlight.FillColor = opts.Color or Color3.fromRGB(255, 255, 255)
     highlight.OutlineColor = Color3.new(0, 0, 0)
     highlight.FillTransparency = 1
@@ -141,53 +136,42 @@ RunService.RenderStepped:Connect(function()
             continue
         end
 
-        -- Visibility Check
         local originWorld = getOriginPos(part, settings.TracerOrigin)
         local screenPos, onScreen = Camera:WorldToViewportPoint(originWorld)
         local distance = (Camera.CFrame.Position - originWorld).Magnitude
 
-        -- Update Highlight
-        if settings.ChamsOutline then
-            entity.Highlight.OutlineTransparency = 0
+        -- Highlight
+        entity.Highlight.OutlineTransparency = settings.ChamsOutline and 0 or 1
+        entity.Highlight.FillTransparency = settings.ChamsFilled and 0.5 or 1
+
+        -- Labels
+        local baseX, baseY = screenPos.X, screenPos.Y + 6
+
+        if settings.ShowName and onScreen then
+            entity.NameLabel.Position = Vector2.new(baseX, baseY)
+            entity.NameLabel.Text = settings.Label or part.Name
+            entity.NameLabel.Visible = true
         else
-            entity.Highlight.OutlineTransparency = 1
+            entity.NameLabel.Visible = false
         end
 
-        if settings.ChamsFilled then
-            entity.Highlight.FillTransparency = 0.5
+        if settings.ShowDistance and onScreen then
+            entity.DistanceLabel.Position = Vector2.new(baseX, baseY + 14)
+            entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
+            entity.DistanceLabel.Visible = true
         else
-            entity.Highlight.FillTransparency = 1
+            entity.DistanceLabel.Visible = false
         end
--- Agrupar os labels verticalmente abaixo do objeto
-local baseX = screenPos.X
-local baseY = screenPos.Y + 6
 
--- Update Name Label
-if settings.ShowName and onScreen then
-    entity.NameLabel.Position = Vector2.new(baseX, baseY)
-    entity.NameLabel.Text = settings.Label or part.Name
-    entity.NameLabel.Visible = true
-else
-    entity.NameLabel.Visible = false
-end
-
--- Update Distance Label logo abaixo do nome
-if settings.ShowDistance and onScreen then
-    entity.DistanceLabel.Position = Vector2.new(baseX, baseY + 14)
-    entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
-    entity.DistanceLabel.Visible = true
-else
-    entity.DistanceLabel.Visible = false
-end
-
--- Update Distance Label logo abaixo do nome
-if settings.ShowDistance and onScreen then
-    entity.DistanceLabel.Position = Vector2.new(labelX, labelY + 14)
-    entity.DistanceLabel.Text = string.format("[%.1fm]", distance)
-    entity.DistanceLabel.Visible = true
-else
-    entity.DistanceLabel.Visible = false
-end
+        -- Tracer
+        if settings.ShowTracer and onScreen then
+            entity.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            entity.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            entity.Tracer.Color = settings.TracerColor
+            entity.Tracer.Visible = true
+        else
+            entity.Tracer.Visible = false
+        end
     end
 end)
 
