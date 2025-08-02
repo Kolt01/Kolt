@@ -1,4 +1,3 @@
--- ESP Library v2 - com suporte a Tracer 3D
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
@@ -23,9 +22,40 @@ local ESP = {
     Objects = {}
 }
 
+-- Função que resolve input para objeto Roblox
+-- Pode receber:
+-- 1) string path: ex "workspace.CurrentRooms['0'].Door.Door"
+-- 2) tabela {Parent = obj, Name = "nomeDoFilho"}
+-- 3) objeto Roblox direto
+function ESP:ResolvePath(input)
+    if typeof(input) == "Instance" then
+        return input
+    elseif type(input) == "string" then
+        local func, err = loadstring("return " .. input)
+        if not func then
+            warn("Falha ao compilar path: "..tostring(err))
+            return nil
+        end
+        local ok, result = pcall(func)
+        if not ok then
+            warn("Falha ao executar path: "..tostring(result))
+            return nil
+        end
+        return result
+    elseif type(input) == "table" then
+        -- tenta buscar filho pelo nome
+        if input.Parent and typeof(input.Parent) == "Instance" and type(input.Name) == "string" then
+            return input.Parent:FindFirstChild(input.Name)
+        end
+        return nil
+    else
+        return nil
+    end
+end
+
 -- Utilitários
 local function getRootPart(obj)
-    return obj:IsA("Model") and obj:FindFirstChildWhichIsA("BasePart") or obj
+    return obj and obj:IsA("Model") and obj:FindFirstChildWhichIsA("BasePart") or obj
 end
 
 local function isVisible(part)
@@ -43,9 +73,14 @@ local function getDistance(pos)
 end
 
 -- Criar ESP
-function ESP:Add(object, customName)
+function ESP:Add(input, customName)
+    local object = ESP:ResolvePath(input)
+    if not object then return end
+
     local root = getRootPart(object)
     if not root then return end
+
+    if ESP.Objects[object] then return end -- evita duplicação
 
     local esp = {
         Object = object,
@@ -74,6 +109,29 @@ function ESP:Add(object, customName)
     if ESP.Settings.ShowTracer3D then
         ESP:Create3DTracer(object, ESP.Settings.TracerColor)
     end
+
+    if customName then
+        esp.Name.Text = customName
+    end
+end
+
+-- Remover ESP
+function ESP:Remove(input)
+    local object = ESP:ResolvePath(input)
+    if not object then return end
+
+    local esp = ESP.Objects[object]
+    if not esp then return end
+
+    for _, d in pairs({esp.Name, esp.Distance, esp.Tracer}) do
+        if d and d.Remove then d:Remove() end
+    end
+
+    if esp.Beam3D then pcall(function() esp.Beam3D:Destroy() end) end
+    if esp.OriginAttachment then pcall(function() esp.OriginAttachment:Destroy() end) end
+    if esp.TargetAttachment then pcall(function() esp.TargetAttachment:Destroy() end) end
+
+    ESP.Objects[object] = nil
 end
 
 -- Tracer 3D via Beam
@@ -131,7 +189,9 @@ RunService.RenderStepped:Connect(function()
         -- Nome
         if ESP.Settings.ShowName then
             esp.Name.Position = Vector2.new(screenPos.X, screenPos.Y)
-            esp.Name.Text = object.Name
+            if not esp.Name.Text or esp.Name.Text == "" then
+                esp.Name.Text = object.Name
+            end
             esp.Name.Visible = true
         else
             esp.Name.Visible = false
@@ -157,22 +217,6 @@ RunService.RenderStepped:Connect(function()
         end
     end
 end)
-
--- Remover
-function ESP:Remove(object)
-    local esp = ESP.Objects[object]
-    if not esp then return end
-
-    for _, d in pairs({esp.Name, esp.Distance, esp.Tracer}) do
-        if d and d.Remove then d:Remove() end
-    end
-
-    if esp.Beam3D then pcall(function() esp.Beam3D:Destroy() end) end
-    if esp.OriginAttachment then pcall(function() esp.OriginAttachment:Destroy() end) end
-    if esp.TargetAttachment then pcall(function() esp.TargetAttachment:Destroy() end) end
-
-    ESP.Objects[object] = nil
-end
 
 -- Limpar todos
 function ESP:Clear()
