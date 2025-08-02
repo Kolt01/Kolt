@@ -1,7 +1,4 @@
--- ESP Library by Dhiogo
--- Suporta Model e BasePart
--- Funcionalidades: Chams Outline, Chams Filled, Names, Distance, Tracer (Top, Center, Bottom)
--- Modificações via esp:Modify(type, property, value)
+-- ESP Library by Dhiogo (corrigida e melhorada)
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -11,7 +8,6 @@ local LocalPlayer = Players.LocalPlayer
 local ESP = {}
 ESP.__index = ESP
 
--- Configurações padrão globais da ESP
 ESP.Settings = {
     Enabled = true,
 
@@ -38,16 +34,13 @@ ESP.Settings = {
     TracerOrigin = "Bottom", -- Pode ser "Top", "Center" ou "Bottom"
 }
 
--- Tabela que armazenará as ESPs ativas: chave = objeto, valor = espInstance
 ESP.Entities = {}
 
--- Função utilitária para criar Drawing objects
 local function CreateDrawing(type)
     local success, drawing = pcall(function() return Drawing.new(type) end)
     if success then return drawing else return nil end
 end
 
--- Função para obter posição do tracer na parte, de acordo com posição escolhida
 local function GetTracerPosition(part, position)
     local cf = part.CFrame
     local size = part.Size
@@ -62,7 +55,6 @@ local function GetTracerPosition(part, position)
     end
 end
 
--- Cria uma nova ESP para um objeto
 function ESP.New(object)
     assert(object and (object:IsA("Model") or object:IsA("BasePart")),
         "ESP só suporta Model ou BasePart")
@@ -70,14 +62,12 @@ function ESP.New(object)
     local self = setmetatable({}, ESP)
 
     self.Object = object
-    self.Chams = nil
-    self.ChamsFill = nil
+
     self.NameLabel = nil
     self.DistanceLabel = nil
     self.TracerLine = nil
     self.TracerOriginCircle = nil
 
-    -- Cria Highlight para chams
     self.Highlight = Instance.new("Highlight")
     self.Highlight.Adornee = (object:IsA("Model") and object.PrimaryPart) or object
     self.Highlight.FillColor = ESP.Settings.ChamsFillColor
@@ -86,7 +76,6 @@ function ESP.New(object)
     self.Highlight.OutlineTransparency = 0
     self.Highlight.Parent = game:GetService("CoreGui")
 
-    -- Cria Drawing objects
     if ESP.Settings.ShowName then
         self.NameLabel = CreateDrawing("Text")
         self.NameLabel.Text = object.Name or "ESP"
@@ -123,36 +112,29 @@ function ESP.New(object)
         self.TracerOriginCircle.Visible = true
     end
 
-    -- Aplicar configurações iniciais ao Highlight
-    self.Highlight.FillColor = ESP.Settings.ChamsFillColor
-    self.Highlight.FillTransparency = ESP.Settings.ChamsFillTransparency
-    self.Highlight.OutlineColor = ESP.Settings.ChamsOutlineColor
     self.Highlight.Enabled = ESP.Settings.ShowChamsOutline or ESP.Settings.ShowChamsFill
 
     return self
 end
 
--- Atualiza a ESP a cada frame
 function ESP:Update()
     if not self.Object or not self.Highlight or not self.Highlight.Parent then
         self:Remove()
         return
     end
 
-    -- Checa se objeto ainda existe no workspace
     if not (self.Object.Parent or (self.Object:IsA("Model") and self.Object.PrimaryPart and self.Object.PrimaryPart.Parent)) then
         self:Remove()
         return
     end
 
-    -- Posição base para o texto: centro do objeto (PrimaryPart se Model)
     local part = (self.Object:IsA("Model") and self.Object.PrimaryPart) or self.Object
     if not part then return end
 
     local rootPos = part.Position
     local cameraPos = Camera.CFrame.Position
 
-    -- Posição da etiqueta Nome (acima do objeto)
+    -- Nome
     if self.NameLabel and ESP.Settings.ShowName then
         local screenPos, onScreen = Camera:WorldToViewportPoint(rootPos + Vector3.new(0, part.Size.Y/2 + 0.5, 0))
         if onScreen then
@@ -182,33 +164,34 @@ function ESP:Update()
     end
 
     -- Tracer
-    if self.TracerLine and ESP.Settings.ShowTracer then
-        local tracerPos3D = GetTracerPosition(part, ESP.Settings.TracerOrigin)
-        local origin2D = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y) -- base da tela (bottom-center)
-        local screenPos, onScreen = Camera:WorldToViewportPoint(tracerPos3D)
+    if self.TracerLine then
+        if ESP.Settings.ShowTracer then
+            local tracerPos3D = GetTracerPosition(part, ESP.Settings.TracerOrigin)
+            local origin2D = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y) -- base da tela (bottom-center)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(tracerPos3D)
 
-        if onScreen then
-            self.TracerLine.From = origin2D
-            self.TracerLine.To = Vector2.new(screenPos.X, screenPos.Y)
-            self.TracerLine.Color = ESP.Settings.TracerColor
-            self.TracerLine.Thickness = ESP.Settings.TracerThickness
-            self.TracerLine.Visible = true
+            if onScreen then
+                self.TracerLine.From = origin2D
+                self.TracerLine.To = Vector2.new(screenPos.X, screenPos.Y)
+                self.TracerLine.Color = ESP.Settings.TracerColor
+                self.TracerLine.Thickness = ESP.Settings.TracerThickness
+                self.TracerLine.Visible = true
 
-            self.TracerOriginCircle.Position = origin2D
-            self.TracerOriginCircle.Color = ESP.Settings.TracerColor
-            self.TracerOriginCircle.Visible = true
+                self.TracerOriginCircle.Position = origin2D
+                self.TracerOriginCircle.Color = ESP.Settings.TracerColor
+                self.TracerOriginCircle.Visible = true
+            else
+                self.TracerLine.Visible = false
+                self.TracerOriginCircle.Visible = false
+            end
         else
             self.TracerLine.Visible = false
-            self.TracerOriginCircle.Visible = false
-        end
-    elseif self.TracerLine then
-        self.TracerLine.Visible = false
-        if self.TracerOriginCircle then
-            self.TracerOriginCircle.Visible = false
+            if self.TracerOriginCircle then
+                self.TracerOriginCircle.Visible = false
+            end
         end
     end
 
-    -- Highlight (Chams)
     self.Highlight.Enabled = ESP.Settings.Enabled and (ESP.Settings.ShowChamsFill or ESP.Settings.ShowChamsOutline)
     if self.Highlight.Enabled then
         self.Highlight.FillColor = ESP.Settings.ChamsFillColor
@@ -217,7 +200,6 @@ function ESP:Update()
     end
 end
 
--- Remove a ESP
 function ESP:Remove()
     if self.NameLabel then
         self.NameLabel.Visible = false
@@ -251,7 +233,6 @@ function ESP:Remove()
     ESP.Entities[self.Object] = nil
 end
 
--- Adiciona objeto para ESP
 function ESP.Add(object)
     if ESP.Entities[object] then return ESP.Entities[object] end
     local espInstance = ESP.New(object)
@@ -259,7 +240,6 @@ function ESP.Add(object)
     return espInstance
 end
 
--- Remove objeto da ESP
 function ESP.Remove(object)
     if ESP.Entities[object] then
         ESP.Entities[object]:Remove()
@@ -267,7 +247,6 @@ function ESP.Remove(object)
     end
 end
 
--- Limpa todas ESPs
 function ESP.Clear()
     for obj, espInstance in pairs(ESP.Entities) do
         espInstance:Remove()
@@ -275,10 +254,6 @@ function ESP.Clear()
     ESP.Entities = {}
 end
 
--- Função para modificar configurações da ESP
--- type: string ("Tracer", "ChamsOutline", "ChamsFill", "Name", "Distance")
--- property: string (ex: "Color", "Thickness", "Transparency", "Position", "TextSize")
--- value: valor novo da propriedade
 function ESP.Modify(type, property, value)
     type = type:lower()
     property = property:lower()
@@ -289,14 +264,17 @@ function ESP.Modify(type, property, value)
         elseif property == "thickness" then
             ESP.Settings.TracerThickness = value
         elseif property == "origin" or property == "position" then
-            -- Aceita: "Top", "Center", "Bottom"
-            if type(value) == "string" then
+            if typeof(value) == "string" then
                 local v = value:lower()
                 if v == "top" or v == "center" or v == "bottom" then
-                    ESP.Settings.TracerOrigin = value
+                    -- Corrige capitalização para padrão esperado
+                    ESP.Settings.TracerOrigin = v:sub(1,1):upper() .. v:sub(2):lower()
                 end
             end
+        elseif property == "enabled" then
+            ESP.Settings.ShowTracer = value
         end
+
     elseif type == "chamsoutline" then
         if property == "color" then
             ESP.Settings.ChamsOutlineColor = value
@@ -305,6 +283,7 @@ function ESP.Modify(type, property, value)
         elseif property == "enabled" then
             ESP.Settings.ShowChamsOutline = value
         end
+
     elseif type == "chamsfill" then
         if property == "color" then
             ESP.Settings.ChamsFillColor = value
@@ -313,6 +292,7 @@ function ESP.Modify(type, property, value)
         elseif property == "enabled" then
             ESP.Settings.ShowChamsFill = value
         end
+
     elseif type == "name" then
         if property == "color" then
             ESP.Settings.NameColor = value
@@ -323,6 +303,7 @@ function ESP.Modify(type, property, value)
         elseif property == "enabled" then
             ESP.Settings.ShowName = value
         end
+
     elseif type == "distance" then
         if property == "color" then
             ESP.Settings.DistanceColor = value
@@ -331,15 +312,14 @@ function ESP.Modify(type, property, value)
         elseif property == "enabled" then
             ESP.Settings.ShowDistance = value
         end
+
     elseif type == "enabled" and property == "esp" then
         ESP.Settings.Enabled = value
     end
 end
 
--- Atualiza todas ESPs a cada frame
 RunService.RenderStepped:Connect(function()
     if not ESP.Settings.Enabled then
-        -- Esconde tudo se ESP estiver desabilitada
         for _, espInstance in pairs(ESP.Entities) do
             if espInstance.NameLabel then espInstance.NameLabel.Visible = false end
             if espInstance.DistanceLabel then espInstance.DistanceLabel.Visible = false end
