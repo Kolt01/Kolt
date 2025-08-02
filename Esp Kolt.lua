@@ -5,28 +5,34 @@ local LocalPlayer = Players.LocalPlayer
 
 local ESP = {
     Enabled = true,
-    TracerOrigin = "Bottom", -- "Top", "Center", "Bottom", "LeftBottom", "RightBottom"
+    TracerOrigin = "Bottom", -- Opções: "Top", "Center", "Bottom", "LeftInferior", "RightInferior"
     Settings = {
         ShowTracer2D = true,
         ShowTracer3D = false,
         ShowName = true,
         ShowDistance = true,
         TracerColor = Color3.new(1, 1, 1),
-        Font = Drawing.Fonts.UI, -- Arcade, System, Plex, Gotham são opções
+        -- Font agora é string que referencia a Fonts disponíveis
+        Font = "UI",
+        Fonts = {
+            UI = Drawing.Fonts.UI,
+            System = Drawing.Fonts.System,
+            Plex = Drawing.Fonts.Plex,
+            Fantasy = Drawing.Fonts.Fantasy,
+            Monospace = Drawing.Fonts.Monospace,
+        },
         Size = 13,
         DistanceOffset = Vector2.new(0, 15),
         Outline = true,
         MinDistance = 0,
         MaxDistance = 300,
-        ShowHighlightOutline = true,
-        ShowHighlightFill = true,
-        HighlightFillColor = Color3.fromRGB(0, 255, 0),
-        HighlightOutlineColor = Color3.fromRGB(0, 0, 0),
-        DotSize = 6,
+        ShowHighlightOutline = false,
+        ShowHighlightFill = false,
     },
     Objects = {}
 }
 
+-- Resolve input para Roblox Instance (sem alteração)
 function ESP:ResolvePath(input)
     if typeof(input) == "Instance" then
         return input
@@ -53,74 +59,54 @@ function ESP:ResolvePath(input)
 end
 
 local function getRootPart(obj)
-    if obj and obj:IsA("Model") then
-        if obj.PrimaryPart then
-            return obj.PrimaryPart
-        else
-            return obj:FindFirstChildWhichIsA("BasePart", true) -- busca recursiva
-        end
-    elseif obj and obj:IsA("BasePart") then
-        return obj
-    end
-    return nil
+    return obj and obj:IsA("Model") and obj:FindFirstChildWhichIsA("BasePart") or obj
 end
 
-local function worldToScreen(pos)
-    return Camera:WorldToViewportPoint(pos)
+local function worldToScreen(part)
+    return Camera:WorldToViewportPoint(part.Position)
 end
 
 local function getDistance(pos)
     return (Camera.CFrame.Position - pos).Magnitude
 end
 
-local function CreateHighlight(target)
-    -- Evita criar highlight duplicado
-    local existing = target:FindFirstChild("ESP_Highlight")
-    if existing then return existing end
+-- Calcula a posição da origem do tracer no viewport, considerando o setting e Highlight
+local function getTracerOriginPosition(esp)
+    local settings = ESP.Settings
+    local viewportSize = Camera.ViewportSize
 
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Highlight"
-    highlight.Adornee = target
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.FillColor = ESP.Settings.HighlightFillColor
-    highlight.OutlineColor = ESP.Settings.HighlightOutlineColor
-    highlight.FillTransparency = ESP.Settings.ShowHighlightFill and 0.4 or 1
-    highlight.OutlineTransparency = ESP.Settings.ShowHighlightOutline and 0 or 1
-    highlight.Enabled = (ESP.Settings.ShowHighlightOutline or ESP.Settings.ShowHighlightFill)
-    highlight.Parent = target
-    return highlight
+    if esp.Highlight and settings.ShowHighlightOutline then
+        -- Usa topo do BoundingBox do Highlight (ou PrimaryPart)
+        local root = getRootPart(esp.Object)
+        if root then
+            local cframe, size = root:GetBoundingBox()
+            local topPos = cframe.Position + Vector3.new(0, size.Y/2, 0)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(topPos)
+            if onScreen then
+                return Vector2.new(screenPos.X, screenPos.Y)
+            end
+        end
+    end
+
+    -- Se não tem highlight ou não está visível, calcula baseado na opção TracerOrigin
+    local cx, cy = viewportSize.X/2, viewportSize.Y -- default Bottom center
+    if ESP.TracerOrigin == "Bottom" then
+        return Vector2.new(cx, viewportSize.Y)
+    elseif ESP.TracerOrigin == "Center" then
+        return Vector2.new(cx, viewportSize.Y/2)
+    elseif ESP.TracerOrigin == "Top" then
+        return Vector2.new(cx, 0)
+    elseif ESP.TracerOrigin == "LeftInferior" then
+        return Vector2.new(0, viewportSize.Y)
+    elseif ESP.TracerOrigin == "RightInferior" then
+        return Vector2.new(viewportSize.X, viewportSize.Y)
+    else
+        -- default Bottom
+        return Vector2.new(cx, viewportSize.Y)
+    end
 end
 
-local function CreateText()
-    local text = Drawing.new("Text")
-    text.Visible = false
-    text.Center = true
-    text.Outline = ESP.Settings.Outline
-    text.Font = ESP.Settings.Font
-    text.Size = ESP.Settings.Size
-    text.Color = ESP.Settings.TracerColor
-    return text
-end
-
-local function CreateLine()
-    local line = Drawing.new("Line")
-    line.Visible = false
-    line.Color = ESP.Settings.TracerColor
-    line.Thickness = 1
-    return line
-end
-
-local function CreateDot()
-    local dot = Drawing.new("Circle")
-    dot.Visible = false
-    dot.Color = ESP.Settings.TracerColor
-    dot.Thickness = 1
-    dot.NumSides = 20
-    dot.Filled = true
-    dot.Radius = ESP.Settings.DotSize / 2
-    return dot
-end
-
+-- Modificação na função Add para criar o círculo da origem do tracer
 function ESP:Add(input, customName)
     local object = ESP:ResolvePath(input)
     if not object then return end
@@ -132,22 +118,61 @@ function ESP:Add(input, customName)
 
     local esp = {
         Object = object,
-        Name = CreateText(),
-        Distance = CreateText(),
-        Tracer = CreateLine(),
-        TracerDot = CreateDot(),
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text"),
+        Tracer = Drawing.new("Line"),
+        TracerOriginDot = Drawing.new("Circle"), -- Círculo do ponto de origem
     }
 
-    esp.Name.Text = customName or object.Name
+    for _, d in pairs({esp.Name, esp.Distance}) do
+        d.Visible = false
+        d.Center = true
+        -- Escolhe fonte via string e tabela Fonts
+        d.Font = ESP.Settings.Fonts[ESP.Settings.Font] or Drawing.Fonts.UI
+        d.Size = ESP.Settings.Size
+        d.Outline = ESP.Settings.Outline
+    end
 
+    esp.Name.Color = ESP.Settings.TracerColor
+    esp.Distance.Color = ESP.Settings.TracerColor
+
+    esp.Tracer.Visible = false
+    esp.Tracer.Color = ESP.Settings.TracerColor
+    esp.Tracer.Thickness = 1
+
+    -- Configura círculo do ponto de origem
+    esp.TracerOriginDot.Visible = false
+    esp.TracerOriginDot.Color = ESP.Settings.TracerColor
+    esp.TracerOriginDot.Thickness = 1
+    esp.TracerOriginDot.NumSides = 16
+    esp.TracerOriginDot.Radius = 4
+    esp.TracerOriginDot.Filled = true
+
+    -- Highlight (opcional)
     if ESP.Settings.ShowHighlightOutline or ESP.Settings.ShowHighlightFill then
-        esp.Highlight = CreateHighlight(object)
+        if object:IsA("Model") and not object.PrimaryPart then
+            object.PrimaryPart = getRootPart(object)
+        end
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ESP_Highlight"
+        highlight.Adornee = object
+        highlight.FillColor = ESP.Settings.TracerColor
+        highlight.OutlineColor = Color3.new(0, 0, 0)
+        highlight.FillTransparency = ESP.Settings.ShowHighlightFill and 0.5 or 1
+        highlight.OutlineTransparency = ESP.Settings.ShowHighlightOutline and 0 or 1
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = object
+        esp.Highlight = highlight
     end
 
     ESP.Objects[object] = esp
 
     if ESP.Settings.ShowTracer3D then
         ESP:Create3DTracer(object, ESP.Settings.TracerColor)
+    end
+
+    if customName then
+        esp.Name.Text = customName
     end
 end
 
@@ -158,18 +183,19 @@ function ESP:Remove(input)
     local esp = ESP.Objects[object]
     if not esp then return end
 
-    esp.Name:Remove()
-    esp.Distance:Remove()
-    esp.Tracer:Remove()
-    esp.TracerDot:Remove()
-
-    if esp.Highlight then
-        esp.Highlight:Destroy()
+    for _, d in pairs({esp.Name, esp.Distance, esp.Tracer, esp.TracerOriginDot}) do
+        if d and d.Remove then
+            d:Remove()
+        end
     end
 
-    if esp.Beam3D then esp.Beam3D:Destroy() end
-    if esp.OriginAttachment then esp.OriginAttachment:Destroy() end
-    if esp.TargetAttachment then esp.TargetAttachment:Destroy() end
+    if esp.Beam3D then pcall(function() esp.Beam3D:Destroy() end) end
+    if esp.OriginAttachment then pcall(function() esp.OriginAttachment:Destroy() end) end
+    if esp.TargetAttachment then pcall(function() esp.TargetAttachment:Destroy() end) end
+
+    if esp.Highlight then
+        pcall(function() esp.Highlight:Destroy() end)
+    end
 
     ESP.Objects[object] = nil
 end
@@ -191,17 +217,16 @@ function ESP:Create3DTracer(object, color)
     beam.Attachment1 = target
     beam.Width0 = 0.1
     beam.Width1 = 0.1
-    beam.Color = ColorSequence.new(color or Color3.new(1,1,1))
+    beam.Color = ColorSequence.new(color or Color3.new(1, 1, 1))
     beam.FaceCamera = true
     beam.AlwaysOnTop = true
     beam.Name = "_ESP_Beam"
     beam.Parent = origin
 
-    local esp = ESP.Objects[object]
-    if esp then
-        esp.Beam3D = beam
-        esp.OriginAttachment = origin
-        esp.TargetAttachment = target
+    if ESP.Objects[object] then
+        ESP.Objects[object].Beam3D = beam
+        ESP.Objects[object].OriginAttachment = origin
+        ESP.Objects[object].TargetAttachment = target
     end
 end
 
@@ -218,53 +243,36 @@ end
 RunService.RenderStepped:Connect(function()
     if not ESP.Enabled then return end
 
-    local viewportSize = Camera.ViewportSize
-
-    local function getTracerOrigin()
-        if ESP.TracerOrigin == "Top" then
-            return Vector2.new(viewportSize.X/2, viewportSize.Y * 0.1)
-        elseif ESP.TracerOrigin == "Center" then
-            return Vector2.new(viewportSize.X/2, viewportSize.Y/2)
-        elseif ESP.TracerOrigin == "Bottom" then
-            return Vector2.new(viewportSize.X/2, viewportSize.Y * 0.9)
-        elseif ESP.TracerOrigin == "LeftBottom" then
-            return Vector2.new(viewportSize.X * 0.1, viewportSize.Y * 0.9)
-        elseif ESP.TracerOrigin == "RightBottom" then
-            return Vector2.new(viewportSize.X * 0.9, viewportSize.Y * 0.9)
-        else
-            return Vector2.new(viewportSize.X/2, viewportSize.Y * 0.9)
-        end
-    end
-
     for object, esp in pairs(ESP.Objects) do
         local root = getRootPart(object)
         if not root or not object:IsDescendantOf(workspace) then
             ESP:Remove(object)
-            goto continue
+            continue
         end
 
-        local cf = root.CFrame
-        local size = root.Size
-        local topPos = cf * Vector3.new(0, size.Y/2, 0)
-
-        local screenPos, onScreen = worldToScreen(topPos)
-        local dist = math.floor(getDistance(topPos))
+        local screenPos, onScreen = worldToScreen(root)
+        local dist = math.floor(getDistance(root.Position))
 
         if not onScreen or dist < ESP.Settings.MinDistance or dist > ESP.Settings.MaxDistance then
             esp.Name.Visible = false
             esp.Distance.Visible = false
             esp.Tracer.Visible = false
-            esp.TracerDot.Visible = false
-            goto continue
+            esp.TracerOriginDot.Visible = false
+            continue
         end
 
+        -- Nome
         if ESP.Settings.ShowName then
             esp.Name.Position = Vector2.new(screenPos.X, screenPos.Y)
+            if not esp.Name.Text or esp.Name.Text == "" then
+                esp.Name.Text = esp.Object.Name
+            end
             esp.Name.Visible = true
         else
             esp.Name.Visible = false
         end
 
+        -- Distância
         if ESP.Settings.ShowDistance then
             esp.Distance.Position = Vector2.new(screenPos.X, screenPos.Y) + ESP.Settings.DistanceOffset
             esp.Distance.Text = tostring(dist) .. "m"
@@ -273,22 +281,21 @@ RunService.RenderStepped:Connect(function()
             esp.Distance.Visible = false
         end
 
+        -- Tracer 2D
         if ESP.Settings.ShowTracer2D then
-            local fromPos = getTracerOrigin()
-            esp.Tracer.From = fromPos
+            local originPos = getTracerOriginPosition(esp)
+
+            esp.Tracer.From = originPos
             esp.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-            esp.Tracer.Color = ESP.Settings.TracerColor
             esp.Tracer.Visible = true
 
-            esp.TracerDot.Position = fromPos
-            esp.TracerDot.Color = ESP.Settings.TracerColor
-            esp.TracerDot.Visible = true
+            -- Bolinha no ponto de origem do tracer
+            esp.TracerOriginDot.Position = originPos
+            esp.TracerOriginDot.Visible = true
         else
             esp.Tracer.Visible = false
-            esp.TracerDot.Visible = false
+            esp.TracerOriginDot.Visible = false
         end
-
-        ::continue::
     end
 end)
 
